@@ -1,0 +1,171 @@
+<!doctype html>
+<html lang="el"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Coreglow Mockup</title>
+<style>
+:root{--bg:#12141c;--panel:rgba(22,22,36,.92);--border:rgba(255,255,255,.11);--text:#ebeef5;--label:#969eaf;--track:rgba(255,255,255,.09);
+--a1:#00c8ff;--a2:#965aff;--up:#be6eff;--ok:#3cdc8c;--warn:#ffb432;--hot:#ff4650;--new:#ffd23c}
+*{box-sizing:border-box;margin:0}
+body{background:radial-gradient(1200px 800px at 70% 0,#2a2f45,#0b0c12);color:var(--text);font:13px/1.35 "Noto Sans",system-ui,sans-serif;min-height:100vh;padding:32px 16px;display:flex;gap:40px;justify-content:center;flex-wrap:wrap}
+.col{display:flex;flex-direction:column;gap:12px;width:340px}
+.panel{background:linear-gradient(#1c182c,#12141c);border:1px solid var(--border);border-radius:16px;padding:18px 20px;position:relative}
+.row{display:flex;justify-content:space-between;align-items:baseline;gap:8px}
+.lbl{color:var(--label)}.sm{font-size:11px}.xs{font-size:10px}.b{font-weight:700}
+h4{font-size:11px;color:var(--label);letter-spacing:.04em;margin:14px 0 8px}
+hr{border:0;border-top:1px solid rgba(255,255,255,.08);margin:12px 0}
+.dot{width:8px;height:8px;border-radius:50%;background:var(--a1);display:inline-block;margin-right:6px}
+.rings{display:flex;justify-content:space-between;margin-top:14px}
+.ring{text-align:center;width:90px}.ring b{display:block;font-size:12px;margin-bottom:6px}
+.ring svg{width:84px;height:84px}
+.mm{font-size:9.5px;color:var(--label);margin-top:3px}
+.threads{display:flex;gap:2px;height:30px;align-items:flex-end;margin-top:12px}
+.threads i{flex:1;background:var(--track);height:100%;position:relative}
+.threads i::after{content:"";position:absolute;bottom:0;left:0;right:0;height:var(--h);background:var(--c,var(--a1))}
+.bar{height:6px;border-radius:3px;background:var(--track);flex:1;margin:0 10px;overflow:hidden}
+.bar i{display:block;height:100%;border-radius:3px;background:linear-gradient(90deg,var(--a2),var(--a1))}
+.bar.warn i{background:linear-gradient(90deg,var(--warn),#ff8a3c)}.bar.hot i{background:linear-gradient(90deg,#ff8a3c,var(--hot))}
+.mrow{display:flex;align-items:center}.mrow>span:first-child{width:46px}
+.sub{padding-left:56px;margin-top:2px}
+.spark{width:100%;height:46px;display:block;margin-top:6px}
+.chip{display:inline-flex;align-items:center;gap:4px;background:rgba(255,255,255,.06);border-radius:10px;padding:1px 7px;font-size:10.5px}
+.sig{display:inline-flex;gap:1.5px;align-items:flex-end;height:10px}.sig i{width:3px;background:var(--a1);border-radius:1px}.sig i.off{background:var(--track)}
+.flag{display:inline-block;width:16px;height:11px;border-radius:2px;background:linear-gradient(#000 33%,#d00 33% 66%,#fc0 66%);vertical-align:-1px;margin-right:4px}
+.badge{position:absolute;left:-12px;width:22px;height:22px;border-radius:50%;background:var(--new);color:#111;font:700 11px/22px sans-serif;text-align:center;box-shadow:0 0 0 3px rgba(255,210,60,.25)}
+.new{outline:1px dashed rgba(255,210,60,.55);outline-offset:3px;border-radius:6px;position:relative}
+.days{display:flex;justify-content:space-between;text-align:center}.days div{flex:1}
+.hours{display:flex;justify-content:space-between;font-size:9.5px;color:var(--label)}
+.legend{max-width:360px}.legend h2{font-size:18px;margin-bottom:6px}.legend p{color:var(--label);margin-bottom:14px}
+.legend li{list-style:none;display:flex;gap:10px;margin:8px 0;align-items:flex-start}
+.legend li span{flex:none;width:22px;height:22px;border-radius:50%;background:var(--new);color:#111;font:700 11px/22px sans-serif;text-align:center}
+.collapsed{display:flex;align-items:center;gap:14px}
+.collapsed svg{width:44px;height:44px}
+@media (max-width:760px){.legend{order:-1}}
+</style></head><body>
+
+<div class="col">
+  <!-- MAIN PANEL -->
+  <div class="panel">
+    <div class="row"><span class="b"><span class="dot"></span>my-laptop</span><span class="b">12:19 · Wed 21 Oct</span></div>
+    <div class="row sm lbl"><span>Intel Core Ultra 7 165H</span><span>UP 8d 15h 50m</span></div>
+
+    <div class="rings">
+      <div class="ring"><b>CPU</b><svg viewBox="0 0 84 84"><circle cx="42" cy="42" r="34" fill="none" stroke="rgba(255,255,255,.09)" stroke-width="8"/><circle cx="42" cy="42" r="34" fill="none" stroke="url(#g)" stroke-width="8" stroke-linecap="round" stroke-dasharray="40 214" transform="rotate(-90 42 42)"/><text x="42" y="49" text-anchor="middle" fill="#ebeef5" font-size="20">18%</text></svg>
+        <div class="mm new"><span class="badge" style="top:-4px">3</span>min 2 · avg 11 · max 64</div></div>
+      <div class="ring"><b>MAX TEMP</b><svg viewBox="0 0 84 84"><circle cx="42" cy="42" r="34" fill="none" stroke="rgba(255,255,255,.09)" stroke-width="8"/><circle cx="42" cy="42" r="34" fill="none" stroke="#ffb432" stroke-width="8" stroke-linecap="round" stroke-dasharray="145 214" transform="rotate(-90 42 42)"/><text x="42" y="49" text-anchor="middle" fill="#ebeef5" font-size="20">68°</text></svg>
+        <div class="mm">min 45 · avg 61 · max 85</div></div>
+      <div class="ring"><b>GPU</b><svg viewBox="0 0 84 84"><circle cx="42" cy="42" r="34" fill="none" stroke="rgba(255,255,255,.09)" stroke-width="8"/><circle cx="42" cy="42" r="34" fill="none" stroke="url(#g)" stroke-width="8" stroke-linecap="round" stroke-dasharray="70 214" transform="rotate(-90 42 42)"/><text x="42" y="49" text-anchor="middle" fill="#ebeef5" font-size="20">33%</text></svg>
+        <div class="mm">2.6 GB VRAM</div></div>
+    </div>
+
+    <div class="new" style="margin-top:10px"><span class="badge" style="top:6px">2</span>
+      <svg class="spark" viewBox="0 0 300 46" preserveAspectRatio="none">
+        <polyline fill="none" stroke="#ffb432" stroke-width="1.4" points="0,22 20,20 40,24 60,18 80,10 100,8 120,14 140,20 160,22 180,16 200,12 220,18 240,22 260,20 280,17 300,18"/>
+        <polygon fill="rgba(0,200,255,.18)" stroke="none" points="0,46 0,40 20,38 40,41 60,30 80,16 100,20 120,34 140,40 160,41 180,32 200,28 220,36 240,40 260,39 280,36 300,38 300,46"/>
+      </svg>
+      <div class="row xs lbl"><span>CPU &amp; temp · last 10 min</span><span>━ temp ▆ cpu</span></div>
+    </div>
+
+    <div class="threads" id="threads"></div>
+
+    <div class="row" style="margin-top:12px"><span><span class="xs lbl b">PWR</span> AC 89%</span><span><span class="xs lbl b">CLK</span> 4935 MHz</span>
+      <span class="new"><span class="badge" style="top:-3px;left:-28px">5</span><span class="xs lbl b">FAN</span> 3200 rpm</span></div>
+    <div style="margin-top:8px" class="sm">
+      <div class="row"><span><span class="xs lbl b">TOP</span>&nbsp;&nbsp; firefox</span><span>6.1%</span></div>
+      <div class="row lbl"><span style="padding-left:34px">code</span><span>3.4%</span></div>
+      <div class="row lbl"><span style="padding-left:34px">Xorg</span><span>1.2%</span></div>
+    </div>
+    <hr>
+
+    <div class="new" style="padding:2px 0"><span class="badge" style="top:0">4</span>
+      <h4 style="margin-top:2px">BATTERY</h4>
+      <div class="mrow"><span>BAT0</span><div class="bar"><i style="width:89%"></i></div><span>89%</span></div>
+      <div class="row sub xs lbl"><span>Discharging · 12.4 W</span><span>3h 52m left</span></div>
+    </div>
+    <hr>
+
+    <h4>MEMORY</h4>
+    <div class="mrow"><span>RAM</span><div class="bar"><i style="width:49%"></i></div><span>49%</span></div>
+    <div class="sub xs lbl">14.9 GB / 30.8 GB</div>
+    <div class="mrow new" style="margin-top:8px"><span class="badge" style="top:-4px">9</span><span>SWAP</span><div class="bar hot"><i style="width:96%"></i></div><span style="color:var(--hot)">96%</span></div>
+    <div class="sub xs lbl">1.9 GB / 2.0 GB</div>
+    <hr>
+
+    <h4>STORAGE</h4>
+    <div class="mrow"><span>/</span><div class="bar"><i style="width:66%"></i></div><span>66%</span></div>
+    <div class="row sub xs lbl"><span>306.9 GB / 467.9 GB</span><span class="new"><span class="badge" style="top:-5px;left:-28px">6</span>NVMe <span style="color:var(--ok)">41°</span></span></div>
+    <div class="new" style="margin-top:6px"><span class="badge" style="top:8px">1</span>
+      <svg class="spark" viewBox="0 0 300 46" preserveAspectRatio="none">
+        <polygon fill="rgba(0,200,255,.22)" points="0,46 0,44 30,44 40,20 50,42 90,44 100,30 110,44 160,45 170,10 180,38 190,44 250,44 260,34 270,44 300,44 300,46"/>
+        <polyline fill="none" stroke="#be6eff" stroke-width="1.3" points="0,45 60,45 70,36 80,45 130,45 140,28 150,45 210,45 220,40 230,45 300,45"/>
+      </svg>
+      <div class="row xs"><span style="color:var(--a1)">R 684 kB/s</span><span style="color:var(--up)">W 160 kB/s</span></div>
+    </div>
+    <hr>
+
+    <div class="row"><h4 style="margin:0">NETWORK</h4><span class="sm">◉ 94 ms</span></div>
+    <div class="row sm new" style="margin-top:8px"><span class="badge" style="top:-3px">7</span>
+      <span class="chip"><span class="sig"><i style="height:3px"></i><i style="height:5px"></i><i style="height:8px"></i><i class="off" style="height:10px"></i></span> HomeWiFi-5G · -58 dBm</span>
+      <span class="chip new" style="color:var(--ok)"><span class="badge" style="top:-6px;left:-14px;transform:scale(.8)">8</span>VPN wireguard</span></div>
+    <div class="row sm" style="margin-top:8px"><span><span class="lbl">Ext</span> <span class="flag"></span>203.0.113.42</span><span><span class="lbl">LAN</span> 192.168.1.100</span></div>
+    <div class="row" style="margin-top:6px;font-size:14px"><span style="color:var(--a1)">↓ 1.2 MB/s</span><span style="color:var(--up)">↑ 84 kB/s</span></div>
+    <svg class="spark" viewBox="0 0 300 46" preserveAspectRatio="none"><polygon fill="rgba(0,200,255,.25)" points="0,46 0,40 15,30 25,42 40,12 50,40 70,36 80,8 95,38 120,40 140,26 155,41 180,34 200,14 215,40 240,30 260,42 280,22 300,38 300,46"/><polyline fill="none" stroke="#be6eff" stroke-width="1.2" points="0,45 40,44 60,40 80,45 120,43 160,44 200,38 240,44 300,44"/></svg>
+    <div class="xs lbl" style="margin-top:6px">Total: ↓ 14.0 GB &nbsp; ↑ 1.9 GB</div>
+  </div>
+
+  <!-- WEATHER PANEL -->
+  <div class="panel" style="background:linear-gradient(#142234,#12141c)">
+    <div class="row"><h4 style="margin:0">WEATHER</h4><span class="xs lbl">Heraklion · 12:15</span></div>
+    <div style="display:flex;align-items:center;gap:12px;margin-top:10px">
+      <span style="font-size:44px">☀️</span>
+      <div><div style="font-size:34px;line-height:1">22°</div><div class="sm" style="color:var(--a1)">Sunny</div></div>
+      <div style="margin-left:auto;text-align:right" class="sm"><div><span class="xs lbl">Feels</span> 22°</div><div><span class="xs lbl">Humidity</span> 44%</div><div><span class="xs lbl">Wind</span> 4 km/h N</div></div>
+    </div>
+    <div class="row xs new" style="margin-top:8px"><span class="badge" style="top:-4px">13</span><span>🌅 07:28</span><span>🌇 18:34</span><span>🌖 waning gibbous</span></div>
+    <div class="new" style="margin-top:10px"><span class="badge" style="top:6px">14</span>
+      <svg class="spark" viewBox="0 0 300 46" preserveAspectRatio="none">
+        <rect x="150" y="34" width="14" height="12" fill="rgba(0,200,255,.35)"/><rect x="175" y="28" width="14" height="18" fill="rgba(0,200,255,.35)"/><rect x="200" y="38" width="14" height="8" fill="rgba(0,200,255,.35)"/>
+        <polyline fill="none" stroke="#ffb432" stroke-width="1.6" points="0,22 50,14 100,10 150,16 200,26 250,32 300,34"/>
+      </svg>
+      <div class="hours"><span>13h</span><span>15h</span><span>17h</span><span>19h</span><span>21h</span><span>23h</span><span>01h</span></div>
+    </div>
+    <hr>
+    <div class="days sm"><div><div class="xs lbl b">Today</div>☀️ 14°/24°<div class="xs lbl">rain 15%</div></div><div><div class="xs lbl b">Thu</div>☀️ 16°/25°<div class="xs lbl">rain 14%</div></div><div><div class="xs lbl b">Fri</div>☁️ 16°/23°<div class="xs lbl">rain 14%</div></div></div>
+  </div>
+
+  <!-- COLLAPSED -->
+  <div class="panel new"><span class="badge" style="top:-10px">11</span>
+    <div class="row xs lbl" style="margin-bottom:8px"><span>Collapsed view (click header)</span><span>☰</span></div>
+    <div class="collapsed">
+      <svg viewBox="0 0 84 84"><circle cx="42" cy="42" r="34" fill="none" stroke="rgba(255,255,255,.09)" stroke-width="9"/><circle cx="42" cy="42" r="34" fill="none" stroke="#00c8ff" stroke-width="9" stroke-dasharray="40 214" transform="rotate(-90 42 42)"/></svg>
+      <svg viewBox="0 0 84 84"><circle cx="42" cy="42" r="34" fill="none" stroke="rgba(255,255,255,.09)" stroke-width="9"/><circle cx="42" cy="42" r="34" fill="none" stroke="#ffb432" stroke-width="9" stroke-dasharray="145 214" transform="rotate(-90 42 42)"/></svg>
+      <div><div class="b" style="font-size:20px">12:19</div><div class="xs lbl">☀️ 22° Heraklion</div></div>
+    </div>
+  </div>
+</div>
+
+<div class="legend">
+  <h2>Coreglow: προτάσεις</h2>
+  <p>Τα κίτρινα νούμερα δείχνουν τα νέα στοιχεία. Οι αριθμοί είναι ίδιοι με τη λίστα στο chat.</p>
+  <ul>
+    <li><span>1</span>Γράφημα disk read (κυανό) / write (μωβ)</li>
+    <li><span>2</span>Ιστορικό CPU + θερμοκρασίας (10 λεπτά)</li>
+    <li><span>3</span>Min / avg / max τελευταίας ώρας κάτω από τα rings</li>
+    <li><span>4</span>Μπαταρία: %, W, χρόνος που απομένει</li>
+    <li><span>5</span>Ταχύτητα ανεμιστήρα (thinkpad)</li>
+    <li><span>6</span>Θερμοκρασία NVMe</li>
+    <li><span>7</span>Wi-Fi SSID + σήμα</li>
+    <li><span>8</span>Ένδειξη VPN</li>
+    <li><span>9</span>Μπάρες RAM/SWAP αλλάζουν χρώμα όταν γεμίζουν</li>
+    <li><span>10</span>Φωτεινό/σκούρο θέμα από το Cinnamon (δεν φαίνεται εδώ)</li>
+    <li><span>11</span>Σύμπτυξη σε μικρή κάρτα</li>
+    <li><span>12</span>Επιλέξιμο χρώμα accent (Configure)</li>
+    <li><span>13</span>Ανατολή / δύση / φάση φεγγαριού</li>
+    <li><span>14</span>Ωριαία πρόγνωση: θερμοκρασία + βροχή</li>
+  </ul>
+</div>
+
+<svg width="0" height="0" style="position:absolute"><defs><linearGradient id="g" x1="0" x2="1"><stop offset="0" stop-color="#00c8ff"/><stop offset="1" stop-color="#965aff"/></linearGradient></defs></svg>
+<script>
+const t=document.getElementById('threads');
+[8,30,12,55,20,6,9,4,82,14,7,5,10,3,6,4,8,62,5,4,9,3].forEach(v=>{const i=document.createElement('i');i.style.setProperty('--h',v+'%');i.style.setProperty('--c',v>=80?'#ff4650':v>=50?'#ffb432':'#00c8ff');t.appendChild(i)});
+</script>
+</body></html>
