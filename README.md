@@ -8,7 +8,7 @@ Glowing system monitor **desklet for Linux Cinnamon**. A port of the [Coreglow R
   <img src="screenshots/weather.png" width="340" alt="Coreglow weather and collapsed view">
 </p>
 
-<sub>Preview rendered with sample data.</sub>
+<sub>Real screenshot. Hostname and IP addresses replaced with placeholders.</sub>
 
 ## Features
 
