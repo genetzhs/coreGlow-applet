@@ -86,6 +86,10 @@ Everything is read locally from `/proc` and `/sys`. The desklet contacts these s
 - **Weather empty**: check the location spelling and your connection (`curl wttr.in/YourCity?format=3`).
 - Errors are logged in Cinnamon's *Looking Glass* (`Alt+F2` → `lg`).
 
+## License
+
+[MIT](LICENSE)
+
 ## Credits
 
 Design and layout based on [coreglow-rainmeter](https://github.com/stavros-it/coreglow-rainmeter) by stavros-it. This is an independent Cinnamon port.
