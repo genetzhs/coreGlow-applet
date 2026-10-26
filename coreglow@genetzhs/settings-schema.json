@@ -1,0 +1,15 @@
+{
+  "head": { "type": "header", "description": "Coreglow" },
+  "scale": { "type": "spinbutton", "default": 1.25, "min": 0.5, "max": 4.0, "step": 0.25, "units": "x", "description": "Scale (1 = 300px wide)" },
+  "bgAlpha": { "type": "scale", "default": 0.80, "min": 0.0, "max": 1.0, "step": 0.05, "description": "Background opacity" },
+  "theme": { "type": "combobox", "default": "auto", "options": { "Follow Cinnamon": "auto", "Dark": "dark", "Light": "light" }, "description": "Theme" },
+  "accent1": { "type": "colorchooser", "default": "rgb(0,200,255)", "description": "Accent colour 1 (download / read)" },
+  "accent2": { "type": "colorchooser", "default": "rgb(150,90,255)", "description": "Accent colour 2 (upload / write)" },
+  "weatherHead": { "type": "header", "description": "Weather" },
+  "weatherLoc": { "type": "entry", "default": "Heraklion, Crete, Greece", "description": "Location (empty = auto by IP)" },
+  "weatherMins": { "type": "spinbutton", "default": 30, "min": 5, "max": 180, "step": 5, "units": "min", "description": "Refresh interval" },
+  "otherHead": { "type": "header", "description": "Other" },
+  "pingHost": { "type": "entry", "default": "1.1.1.1", "description": "Ping host" },
+  "loadAlert": { "type": "spinbutton", "default": 90, "min": 50, "max": 100, "step": 1, "units": "%", "description": "CPU alert threshold (30 s)" },
+  "collapsed": { "type": "switch", "default": false, "description": "Collapsed (or click the header)" }
+}

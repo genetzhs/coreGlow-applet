@@ -1,0 +1,8 @@
+{
+  "uuid": "coreglow@genetzhs",
+  "name": "Coreglow",
+  "description": "Glowing system monitor desklet for Linux Cinnamon (port of the Coreglow Rainmeter skin): CPU, temp, GPU, RAM, disk, network, weather.",
+  "prevent-decorations": true,
+  "max-instances": 3,
+  "version": "1.0"
+}
