@@ -1,0 +1,11 @@
+/* Draw everything ourselves; suppress the theme's applet padding and hover box. */
+.applet-box.coreglow-panel-applet {
+    padding: 0px;
+    spacing: 0px;
+}
+
+.applet-box.coreglow-panel-applet:hover {
+    background-color: transparent;
+    border-image: none;
+    box-shadow: none;
+}

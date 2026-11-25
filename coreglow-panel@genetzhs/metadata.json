@@ -1,0 +1,18 @@
+{
+    "uuid": "coreglow-panel@genetzhs",
+    "name": "Coreglow Panel",
+    "description": "Coreglow-style CPU and memory monitor for the panel (rings + 60 s graphs).",
+    "version": "1.0.0",
+    "max-instances": 3,
+    "cinnamon-version": [
+        "5.0",
+        "5.2",
+        "5.4",
+        "5.6",
+        "5.8",
+        "6.0",
+        "6.2",
+        "6.4",
+        "6.6"
+    ]
+}

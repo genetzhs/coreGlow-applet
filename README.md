@@ -86,6 +86,30 @@ Everything is read locally from `/proc` and `/sys`. The desklet contacts these s
 - **Weather empty**: check the location spelling and your connection (`curl wttr.in/YourCity?format=3`).
 - Errors are logged in Cinnamon's *Looking Glass* (`Alt+F2` → `lg`).
 
+## Coreglow Panel (panel applet)
+
+`coreglow-panel@genetzhs/` is the **panel applet** sibling of the desklet: small Coreglow-style
+metrics in the Cinnamon panel with an iStat-Menus-style drop-down **on click** (no hover UI).
+One applet, five modes, each instance can use a different one:
+
+- **CPU + memory** — big % values + 60 s graphs; drop-down with rings, per-core bars, RAM/SWAP and used/cached/free breakdown
+- **Load average** — 1-minute load in the panel; drop-down with 1/5/15 min bars (normalised to thread count), CPU history and top processes
+- **Network** — down/up rates; drop-down with 60 s down+up graph, totals, LAN/public IP, gateway, DNS, ping
+- **Uptime** — `6d 21h`; drop-down with boot time, load bars and process count
+- **Public / LAN IP** — public IP in the panel; drop-down with LAN/interface/gateway/DNS/ping
+
+Install:
+
+```bash
+ln -s "$PWD/coreglow-panel@genetzhs" ~/.local/share/cinnamon/applets/coreglow-panel@genetzhs
+```
+
+Then add it via *Applets → +* and pick the mode in **Configure** (`cpumem`, `load`, `net`, `uptime`, `ip`).
+Settings: theme (follow Cinnamon / dark / light), card opacity, accent colours, graphs on/off,
+labels on/off, open-on-hover (off by default), warn threshold. Everything is read locally from
+`/proc`, `/sys`, `ip` and `ping`; only `net`/`ip` modes contact `ipinfo.io` for the public address.
+See `coreglow-panel@genetzhs/context.md` for architecture and hacking notes.
+
 ## License
 
 [MIT](LICENSE)

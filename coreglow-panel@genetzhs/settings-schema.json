@@ -1,0 +1,74 @@
+{
+    "head": {
+        "type": "header",
+        "description": "Coreglow Panel — CPU, memory & load"
+    },
+    "mode": {
+        "type": "combobox",
+        "default": "cpumem",
+        "options": {
+            "CPU + memory": "cpumem",
+            "Load average": "load",
+            "Network": "net",
+            "Uptime": "uptime",
+            "Public / LAN IP": "ip"
+        },
+        "description": "Monitor"
+    },
+    "theme": {
+        "type": "combobox",
+        "default": "auto",
+        "options": {
+            "Follow Cinnamon": "auto",
+            "Dark": "dark",
+            "Light": "light"
+        },
+        "description": "Theme"
+    },
+    "bgAlpha": {
+        "type": "scale",
+        "default": 0.6,
+        "min": 0,
+        "max": 1,
+        "step": 0.05,
+        "description": "Card opacity"
+    },
+    "accent1": {
+        "type": "colorchooser",
+        "default": "rgb(0,200,255)",
+        "description": "CPU accent"
+    },
+    "accent2": {
+        "type": "colorchooser",
+        "default": "rgb(150,90,255)",
+        "description": "Memory accent"
+    },
+    "head2": {
+        "type": "header",
+        "description": "Display"
+    },
+    "showSpark": {
+        "type": "checkbox",
+        "default": true,
+        "description": "Show 60-second graphs"
+    },
+    "showLabels": {
+        "type": "checkbox",
+        "default": true,
+        "description": "Show CPU / RAM labels"
+    },
+    "hoverOpen": {
+        "type": "checkbox",
+        "default": false,
+        "description": "Open the details menu on mouse over"
+    },
+    "hotAt": {
+        "type": "spinbutton",
+        "default": 85,
+        "min": 50,
+        "max": 100,
+        "step": 1,
+        "units": "%",
+        "description": "Warn threshold (amber / red)"
+    }
+}
