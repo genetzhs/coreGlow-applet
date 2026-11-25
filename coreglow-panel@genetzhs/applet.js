@@ -17,13 +17,14 @@ const HIST = 120;          // seconds of history kept in the ring buffers
 const W_FULL = 238;        // labels + values + sparklines
 const W_MINI = 126;        // labels + values only
 const W_LOAD = 152;        // load mode: label + value + sparkline
-const W_LOAD_MINI = 80;    // load mode: label + value
+const W_LOAD_MINI = 64;    // load mode: label + value (compact)
 const W_NET = 185;         // network: down / up
-const W_UP = 110;          // uptime
-const W_IP = 130;          // public IP
-const MW = 300, MH = 330;  // drop-down body (CSS px)
+const W_UP = 84;           // uptime (compact)
+const W_IP = 150;          // public IP (flag + full address)
+const W_TEMP = 64;         // temperature (compact)
+const MW = 300, MH = 486;  // drop-down body (CSS px)
 const MH_LOAD = 368;       // drop-down body in load mode
-const MH_NET = 300, MH_UP = 250, MH_IP = 240;
+const MH_NET = 300, MH_UP = 250, MH_IP = 240, MH_TEMP = 240;
 const MENU_SCALE = 1.2;    // drop-down zoom (window + text)
 const INSTANCES = new Set();
 const STYLE = "coreglow-panel-applet";
@@ -38,7 +39,7 @@ const LIGHT = {
     text: [25, 28, 38, 1], label: [96, 104, 122, 1],
     track: [0, 0, 0, 0.08], base: [0, 0, 0, 0.06], divider: [0, 0, 0, 0.06],
 };
-const FIXED = { warn: [255, 170, 40, 1], hot: [255, 70, 80, 1] };
+const FIXED = { ok: [60, 200, 130, 1], warn: [255, 170, 40, 1], hot: [255, 70, 80, 1] };
 
 function readFile(path) {
     try {
@@ -65,7 +66,24 @@ function ring(n) { return { a: new Array(n).fill(NaN), i: 0, n }; }
 function push(r, v) { r.a[r.i] = v; r.i = (r.i + 1) % r.n; }
 function ordered(r) { return r.a.slice(r.i).concat(r.a.slice(0, r.i)); }
 
+function stats(r) {
+    let v = r.a.filter(x => !isNaN(x));
+    if (!v.length) return null;
+    return { min: Math.min(...v), max: Math.max(...v), avg: v.reduce((a, b) => a + b, 0) / v.length };
+}
+
 function readNum(path) { let s = readFile(path); return s === null ? NaN : parseFloat(s); }
+
+function hwmonBy(pred) {
+    for (let i = 0; i < 32; i++) {
+        let p = `/sys/class/hwmon/hwmon${i}`, n = (readFile(p + "/name") || "").trim();
+        if (n && pred(n, p)) return p;
+    }
+    return null;
+}
+
+const CACHE = GLib.get_user_cache_dir() + "/coreglow";
+GLib.mkdir_with_parents(CACHE, 0o755);
 
 class CoreglowPanelApplet extends Applet.Applet {
     constructor(metadata, orientation, panelHeight, instanceId) {
@@ -73,20 +91,26 @@ class CoreglowPanelApplet extends Applet.Applet {
 
         this._meta = metadata;
         this._ph = panelHeight;
-        this.d = { cpu: 0, threads: [], memUsed: 0, memTot: 0, memPct: 0, swapUsed: 0, swapTot: 0, cached: 0, load: "", mhz: 0, host: GLib.get_host_name(), load1: 0, load5: 0, load15: 0, uptime: "", top: [], upSec: 0, procs: 0, iface: "", lan: "", ext: "", gateway: "", dns: "", ping: "", down: 0, upl: 0, totDown: 0, totUp: 0 };
+        this.d = { cpu: 0, threads: [], memUsed: 0, memTot: 0, memPct: 0, swapUsed: 0, swapTot: 0, cached: 0, load: "", mhz: 0, host: GLib.get_host_name(), load1: 0, load5: 0, load15: 0, uptime: "", top: [], upSec: 0, procs: 0, iface: "", lan: "", ext: "", gateway: "", dns: "", ping: "", down: 0, upl: 0, totDown: 0, totUp: 0, cpuTemp: NaN, userPct: 0, sysPct: 0, pressure: NaN, topMem: [], cc: "", fan: NaN, nvmeTemp: NaN };
         this.hCpu = ring(HIST);
         this.hMem = ring(HIST);
         this.hLoad = ring(HIST);
         this.hDown = ring(HIST);
         this.hUp = ring(HIST);
+        this.hTemp = ring(HIST);
         this.prevNet = null;
+        this.hwTemp = hwmonBy(n => ["coretemp", "k10temp", "zenpower"].includes(n));
+        this.hwFan = hwmonBy((n, p) => GLib.file_test(p + "/fan1_input", GLib.FileTest.EXISTS));
+        this.hwNvme = hwmonBy(n => n === "nvme");
+        this._cc = null;
+        this.flag = null;
         this.prevStat = null;
         this.tick = 0;
         this.hover = false;
         this.sysDark = this._sysDark();
 
         this.settings = new Settings.AppletSettings(this, UUID, instanceId);
-        for (let k of ["mode", "theme", "bgAlpha", "accent1", "accent2", "showSpark", "showLabels", "hoverOpen", "hotAt"])
+        for (let k of ["mode", "theme", "accent1", "accent2", "showSpark", "showLabels", "hoverOpen", "hotAt"])
             this.settings.bind(k, k, () => this._onSettings());
 
         this.canvas = new St.DrawingArea();
@@ -234,9 +258,10 @@ class CoreglowPanelApplet extends Applet.Applet {
             : this.mode === "net" ? W_NET
             : this.mode === "uptime" ? W_UP
             : this.mode === "ip" ? W_IP
+            : this.mode === "temp" ? W_TEMP
             : (this.showSpark ? W_FULL : W_MINI);
         this.canvas.set_size(W, H);
-        let mh = { load: MH_LOAD, net: MH_NET, uptime: MH_UP, ip: MH_IP }[this.mode] || MH;
+        let mh = { load: MH_LOAD, net: MH_NET, uptime: MH_UP, ip: MH_IP, temp: MH_TEMP }[this.mode] || MH;
         if (this.menuCanvas) this.menuCanvas.set_size(
             Math.round(MW * MENU_SCALE),
             Math.round(mh * MENU_SCALE));
@@ -273,7 +298,10 @@ class CoreglowPanelApplet extends Applet.Applet {
         let d = this.d, t = ++this.tick;
 
         let stat = (readFile("/proc/stat") || "").split("\n").filter(l => /^cpu\d* /.test(l))
-            .map(l => { let v = l.trim().split(/\s+/).slice(1).map(Number); return [v.reduce((a, b) => a + b, 0), v[3] + (v[4] || 0)]; });
+            .map(l => {
+                let v = l.trim().split(/\s+/).slice(1).map(Number);
+                return [v.reduce((a, b) => a + b, 0), v[3] + (v[4] || 0), v[0] + v[1], v[2] + (v[5] || 0) + (v[6] || 0)];
+            });
         if (this.prevStat && this.prevStat.length === stat.length) {
             let pct = stat.map((s, i) => {
                 let dt = s[0] - this.prevStat[i][0], di = s[1] - this.prevStat[i][1];
@@ -281,6 +309,11 @@ class CoreglowPanelApplet extends Applet.Applet {
             });
             d.cpu = pct[0];
             d.threads = pct.slice(1);
+            let dt = stat[0][0] - this.prevStat[0][0];
+            if (dt > 0) {
+                d.userPct = 100 * (stat[0][2] - this.prevStat[0][2]) / dt;
+                d.sysPct = 100 * (stat[0][3] - this.prevStat[0][3]) / dt;
+            }
             push(this.hCpu, d.cpu);
         }
         this.prevStat = stat;
@@ -300,6 +333,13 @@ class CoreglowPanelApplet extends Applet.Applet {
         let tn = Math.max(1, d.threads.length || 1);
         push(this.hLoad, Math.max(0, Math.min(100, 100 * d.load1 / tn)));
 
+        if (this.hwTemp) {
+            let max = NaN;
+            for (let i = 1; i < 32; i++) { let v = readNum(`${this.hwTemp}/temp${i}_input`); if (!isNaN(v) && !(v <= max)) max = v; }
+            d.cpuTemp = max / 1000;
+            if (!isNaN(d.cpuTemp)) push(this.hTemp, d.cpuTemp);
+        }
+
         if (this.mode === "net" || this.mode === "ip") this._netTick(t);
         if (this.mode === "uptime" || this.mode === "load") {
             let up = readNum("/proc/uptime");
@@ -313,7 +353,15 @@ class CoreglowPanelApplet extends Applet.Applet {
             if (!isNaN(up)) d.uptime = `${Math.floor(up / 86400)}d ${String(Math.floor(up % 86400 / 3600)).padStart(2, "0")}h`;
             let mh = (readFile("/proc/cpuinfo") || "").match(/cpu MHz\s*:\s*[\d.]+/g) || [];
             d.mhz = mh.reduce((a, s) => Math.max(a, parseFloat(s.split(":")[1])), 0);
+            d.fan = this.hwFan ? readNum(this.hwFan + "/fan1_input") : NaN;
+            d.nvmeTemp = this.hwNvme ? readNum(this.hwNvme + "/temp1_input") / 1000 : NaN;
+            let pm = (readFile("/proc/pressure/memory") || "").match(/some avg10=([\d.]+)/);
+            d.pressure = pm ? parseFloat(pm[1]) : NaN;
         }
+        if (this.mode === "cpumem" && t % 10 === 0)
+            this._sh("ps -eo comm=,rss= --sort=-rss | head -4", (out) => {
+                d.topMem = out.split("\n").filter(l => l).map(l => { let p = l.trim().split(/\s+/); return [p[0], (+p[1] || 0) * 1024]; });
+            });
         if (this.mode === "load" && t % 5 === 0)
             this._sh("top -b -n2 -d0.5 -o %CPU -w 512 | awk '/^ *PID/{n++;next} n==2{print $12\" \"$9; if(++c==4) exit}'", (out) => {
                 d.top = out.split("\n").filter(l => l).map(l => { let p = l.split(" "); return [p[0], parseFloat(p[1]) || 0]; });
@@ -360,12 +408,23 @@ class CoreglowPanelApplet extends Applet.Applet {
                 (out) => { d.ping = out ? Math.round(parseFloat(out)) + " ms" : "—"; });
         if (!d.ext || t % 600 === 0)
             this._sh("curl -s -m 8 https://ipinfo.io/json", (out) => {
-                try { let j = JSON.parse(out); if (j.ip) d.ext = j.ip; } catch (e) { }
+                try {
+                    let j = JSON.parse(out);
+                    if (j.ip) d.ext = j.ip;
+                    let cc = (j.country || "").toLowerCase();
+                    if (cc) this._ensureFlag(cc);
+                } catch (e) { }
             });
     }
 
     _tooltip() {
         let d = this.d, C = this.C, hex = this._labelHex;
+        if (this.mode === "temp") {
+            let t = d.cpuTemp, st = stats(this.hTemp);
+            this.set_applet_tooltip(`<b>CPU temp</b>  ${isNaN(t) ? "—" : Math.round(t) + "°"}` +
+                (st ? `\nmin ${Math.round(st.min)}° · avg ${Math.round(st.avg)}° · max ${Math.round(st.max)}°` : ""), true);
+            return;
+        }
         if (this.mode === "net") {
             this.set_applet_tooltip(`<b>↓</b> ${fmtBytes(d.down, "/s")}   <b>↑</b> ${fmtBytes(d.upl, "/s")}\n` +
                 `${d.iface || "—"} · ${d.lan || "—"} · ${d.ping || "—"}`, true);
@@ -456,20 +515,6 @@ class CoreglowPanelApplet extends Applet.Applet {
     }
 
     // ---------- pieces ----------
-    _card(cr, g) {
-        let C = this.C, a = Math.min(1, (this.bgAlpha || 0) + (this.hover ? 0.06 : 0));
-        cr.newPath();
-        this._rrect(cr, 0.5, g.inset + 0.5, g.W - 1, g.ch - 1, 8);
-        let bg = new Cairo.LinearGradient(0, g.inset, 0, g.inset + g.ch);
-        bg.addColorStopRGBA(0, C.bgTop[0] / 255, C.bgTop[1] / 255, C.bgTop[2] / 255, a);
-        bg.addColorStopRGBA(1, C.bg[0] / 255, C.bg[1] / 255, C.bg[2] / 255, a);
-        cr.setSource(bg);
-        cr.fillPreserve();
-        this._col(cr, C.border, this.hover ? 0.20 : C.border[3]);
-        cr.setLineWidth(1);
-        cr.stroke();
-    }
-
     _ring(cr, cx, cy, r, pct, lw) {
         let C = this.C, LW = lw || 3;
         cr.setLineCap(Cairo.LineCap.ROUND);
@@ -546,10 +591,10 @@ class CoreglowPanelApplet extends Applet.Applet {
         let lv = vals[n - 1];
         if (!isNaN(lv)) {
             let ex = px(n - 1), ey = py(lv), dot = this._pctColor(pct);
-            this._col(cr, dot, 0.18);
-            cr.newPath(); cr.arc(ex, ey, 4, 0, 2 * Math.PI); cr.fill();
+            this._col(cr, dot, 0.14);
+            cr.newPath(); cr.arc(ex, ey, 3.4, 0, 2 * Math.PI); cr.fill();
             this._col(cr, dot);
-            cr.newPath(); cr.arc(ex, ey, 1.7, 0, 2 * Math.PI); cr.fill();
+            cr.newPath(); cr.arc(ex, ey, 1.5, 0, 2 * Math.PI); cr.fill();
         }
     }
 
@@ -595,6 +640,7 @@ class CoreglowPanelApplet extends Applet.Applet {
             else if (this.mode === "net") this._netBody(cr);
             else if (this.mode === "uptime") this._uptimeBody(cr);
             else if (this.mode === "ip") this._ipBody(cr);
+            else if (this.mode === "temp") this._tempBody(cr);
             else this._menuBody(cr);
             cr.restore();
         } finally {
@@ -768,7 +814,8 @@ class CoreglowPanelApplet extends Applet.Applet {
         let C = this.C, d = this.d, pad = 12, right = MW - 12;
         this._header(cr, pad, right);
         this._tracked(cr, "PUBLIC IP", pad, 44, 9.2, C.label, 0.7, "l");
-        this._text(cr, d.ext || "—", pad, 78, "l", C.a1, 22, true);
+        let fw = this._drawFlag(cr, pad, 60, 16);
+        this._text(cr, d.ext || "—", pad + (fw ? fw + 8 : 0), 78, "l", C.a1, 22, true);
         this._dividerLine(cr, pad, right, 96);
         [["LAN", d.lan || "—"], ["INTERFACE", d.iface || "—"], ["GATEWAY", d.gateway || "—"], ["DNS", d.dns || "—"], ["PING", d.ping || "—"]].forEach((r, i) => {
             let y = 118 + i * 22;
@@ -777,95 +824,180 @@ class CoreglowPanelApplet extends Applet.Applet {
         });
     }
 
-    _menuBody(cr) {
-        let C = this.C, d = this.d;
-        let pad = 12, right = MW - 12, cpu = Math.max(0, Math.min(100, d.cpu || 0));
-        let mem = Math.max(0, Math.min(100, d.memPct || 0));
-        let warnAt = this.hotAt || 85;
-        let sep = (y) => { this._col(cr, C.divider); cr.setLineWidth(1); cr.newPath(); cr.moveTo(pad, y + 0.5); cr.lineTo(right, y + 0.5); cr.stroke(); };
-
-        this._header(cr, pad, right);
-
-        // CPU / RAM rings
-        this._tracked(cr, "CPU", 48, 40, 8.5, C.label, 0.9);
-        this._tracked(cr, "RAM", 252, 40, 8.5, C.label, 0.9);
-        this._ring(cr, 48, 76, 30, cpu, 3.4);
-        this._pct(cr, 48, 76, 30, cpu, 12.5);
-        this._ring(cr, 252, 76, 30, mem, 3.4);
-        this._pct(cr, 252, 76, 30, mem, 12.5);
-
-        // centre stats
-        let stat = (label, value, y) => {
-            this._text(cr, label, 150, y, "c", C.label, 8, true);
-            this._text(cr, value, 150, y + 12, "c", C.text, 11.5);
-        };
-        stat("CLK", d.mhz ? (d.mhz / 1000).toFixed(2) + " GHz" : "—", 44);
-        stat("LOAD", d.load || "—", 72);
-        stat("THREADS", String(d.threads.length || "—"), 100);
-
-        sep(122);
-
-        this._cores(cr, pad, right, 140, 148, warnAt);
-
-        sep(190);
-
-        // memory
-        this._tracked(cr, "MEMORY", pad, 208, 9.2, C.label, 0.7, "l");
-        this._text(cr, fmtBytes(d.memUsed) + " / " + fmtBytes(d.memTot), right, 208, "r", C.text, 10.5);
-        this._text(cr, "RAM", pad, 230, "l", C.text, 11.5);
-        this._bar(cr, 56, 223, 176, 7, mem, warnAt);
-        this._text(cr, Math.round(mem) + "%", right, 230, "r", this._pctColor(mem), 11.5);
-        let free = Math.max(0, d.memTot - d.memUsed - d.cached);
-        this._text(cr, "used " + fmtBytes(d.memUsed) + "   ·   cached " + fmtBytes(d.cached) + "   ·   free " + fmtBytes(free),
-            56, 244, "l", C.label, 9.3);
-
-        let swapPct = d.swapTot ? 100 * d.swapUsed / d.swapTot : 0;
-        this._text(cr, "SWAP", pad, 266, "l", C.text, 11.5);
-        this._bar(cr, 56, 259, 176, 7, swapPct, warnAt);
-        this._text(cr, Math.round(swapPct) + "%", right, 266, "r", this._pctColor(swapPct), 11.5);
-        this._text(cr, d.swapTot ? fmtBytes(d.swapUsed) + " / " + fmtBytes(d.swapTot) : "none", 56, 280, "l", C.label, 9.3);
-
-        sep(292);
-
-        // stacked memory bar: used / cached / free
-        let w = right - pad, y = 302, h = 8;
-        cr.newPath(); this._rrect(cr, pad, y, w, h, h / 2); this._col(cr, C.track); cr.fill();
-        if (d.memTot) {
-            cr.save();
-            cr.newPath(); this._rrect(cr, pad, y, w, h, h / 2); cr.clip();
-            let ux = 0, uw = w * d.memUsed / d.memTot, cw = w * d.cached / d.memTot, fw = Math.max(0, w - uw - cw);
-            this._col(cr, C.a2); cr.rectangle(pad + ux, y, uw, h); cr.fill();
-            this._col(cr, C.a1); cr.rectangle(pad + ux + uw, y, cw, h); cr.fill();
-            this._col(cr, C.track); cr.rectangle(pad + ux + uw + cw, y, fw, h); cr.fill();
-            cr.restore();
+    _barHistory(cr, x, y, w, h, ringBuf, col) {
+        let n = 60, vals = this._window(ringBuf, n);
+        let step = w / n, bw = Math.max(1.5, step - 1.5);
+        for (let i = 0; i < n; i++) {
+            let v = vals[i];
+            if (isNaN(v)) continue;
+            let bh = Math.max(1.5, Math.min(100, v) / 100 * h);
+            this._col(cr, col, 0.30 + 0.70 * Math.min(1, v / 80));
+            cr.newPath(); cr.rectangle(x + i * step, y + h - bh, bw, bh); cr.fill();
         }
-        let lx = pad, ly = 322;
-        let legend = [[C.a2, "used " + fmtBytes(d.memUsed)], [C.a1, "cached " + fmtBytes(d.cached)], [C.track, "free " + fmtBytes(free)]];
-        for (let i = 0; i < legend.length; i++) {
-            this._col(cr, legend[i][0], 1);
-            cr.newPath(); cr.arc(lx + 3, ly - 3.2, 3, 0, 2 * Math.PI); cr.fill();
-            let lw = this._text(cr, legend[i][1], lx + 10, ly, "l", C.label, 8.8);
-            lx += 10 + lw + 10;
+        this._col(cr, this.C.base);
+        cr.newPath(); cr.rectangle(x, y + h, w, 1); cr.fill();
+    }
+
+    _coreRings(cr, pad, right, cy1, cy2, warnAt) {
+        let d = this.d, n = d.threads.length;
+        if (!n) return;
+        let perRow = Math.ceil(n / 2), step = (right - pad) / perRow;
+        for (let i = 0; i < n; i++) {
+            let row = i < perRow ? 0 : 1, col = i % perRow;
+            let cx = pad + step / 2 + col * step, cy = row ? cy2 : cy1;
+            this._ring(cr, cx, cy, 7.5, d.threads[i], 1.8);
         }
     }
 
+    _tempBody(cr) {
+        let C = this.C, d = this.d, pad = 12, right = MW - 12, t = d.cpuTemp;
+        this._header(cr, pad, right);
+        this._tracked(cr, "CPU TEMPERATURE", pad, 44, 9.2, C.label, 0.7, "l");
+        let hw = this.hwTemp ? (readFile(this.hwTemp + "/name") || "").trim() : "";
+        this._text(cr, hw || "—", right, 44, "r", C.label, 9);
+
+        this._ring(cr, 48, 86, 30, isNaN(t) ? 0 : t, 3.4);
+        this._text(cr, isNaN(t) ? "—" : Math.round(t) + "°", 48, 86 + 4.5, "c", this._tempColor(t), 13, true);
+        this._tracked(cr, "NOW", 48, 128, 8.5, C.label, 0.9);
+
+        let st = stats(this.hTemp);
+        let stat = (label, value, y) => {
+            this._text(cr, label, 116, y, "l", C.label, 8.5, true);
+            this._text(cr, value, 116, y + 14, "l", C.text, 13);
+        };
+        stat("MIN · 2 MIN", st ? Math.round(st.min) + "°" : "—", 62);
+        stat("AVG", st ? Math.round(st.avg) + "°" : "—", 96);
+        let col = this._tempColor(t);
+        this._text(cr, "MAX", 200, 62, "l", C.label, 8.5, true);
+        this._text(cr, st ? Math.round(st.max) + "°" : "—", 200, 76, "l", col, 13);
+
+        this._spark(cr, pad, 142, right - pad, 44, this.hTemp, col, isNaN(t) ? 0 : t);
+        this._text(cr, "last 2 min", right, 198, "r", C.label, 9);
+
+        if (d.fan > 0) this._text(cr, "FAN  " + Math.round(d.fan) + " rpm", pad, 220, "l", C.label, 10);
+        if (!isNaN(d.nvmeTemp)) {
+            this._text(cr, "NVMe  " + Math.round(d.nvmeTemp) + "°", right, 220, "r", this._tempColor(d.nvmeTemp), 10);
+        }
+    }
+
+    _menuBody(cr) {
+        let C = this.C, d = this.d, pad = 12, right = MW - 12;
+        let warnAt = this.hotAt || 85;
+        let cpu = Math.max(0, Math.min(100, d.cpu || 0));
+        let mem = Math.max(0, Math.min(100, d.memPct || 0));
+        let sep = (y) => this._dividerLine(cr, pad, right, y);
+        this._header(cr, pad, right);
+
+        // CPU: clock / temperature, 60 s bar history, user/system split
+        this._tracked(cr, "CPU", pad, 44, 9.2, C.label, 0.7, "l");
+        let ghz = d.mhz ? (d.mhz / 1000).toFixed(2) + " GHz" : "—";
+        let temp = isNaN(d.cpuTemp) ? "" : ", " + Math.round(d.cpuTemp) + "°";
+        this._text(cr, ghz + temp, right, 44, "r", C.label, 9.5);
+        this._barHistory(cr, pad, 56, right - pad, 44, this.hCpu, C.a1);
+
+        this._dot(cr, pad, 118, C.a1);
+        this._text(cr, "User", pad + 8, 118, "l", C.label, 10);
+        this._text(cr, Math.round(d.userPct) + "%", pad + 52, 118, "l", C.text, 10.5, true);
+        this._dot(cr, right - 88, 118, C.label);
+        this._text(cr, "System", right - 82, 118, "l", C.label, 10);
+        this._text(cr, Math.round(d.sysPct) + "%", right, 118, "r", C.text, 10.5, true);
+
+        this._coreRings(cr, pad, right, 142, 168, warnAt);
+        sep(184);
+
+        // Memory: used + pressure rings, then the breakdown list
+        this._tracked(cr, "MEMORY", pad, 202, 9.2, C.label, 0.7, "l");
+        this._text(cr, fmtBytes(d.memTot) + " total", right, 202, "r", C.label, 9.5);
+        this._ring(cr, 80, 246, 26, mem, 3.4);
+        this._pct(cr, 80, 246, 26, mem, 12);
+        this._tracked(cr, "USED", 80, 284, 8.5, C.label, 0.9);
+        let pr = d.pressure;
+        this._ring(cr, 220, 246, 26, isNaN(pr) ? 0 : pr, 3.4);
+        if (isNaN(pr)) this._text(cr, "—", 220, 246 + 4, "c", C.label, 12, true);
+        else this._pct(cr, 220, 246, 26, pr, 12);
+        this._tracked(cr, "PRESSURE", 220, 284, 8.5, C.label, 0.9);
+
+        let free = Math.max(0, d.memTot - d.memUsed - d.cached);
+        let rows = [
+            [C.a2, "Used", fmtBytes(d.memUsed)],
+            [C.a1, "Cached", fmtBytes(d.cached)],
+            [C.track, "Free", fmtBytes(free)],
+            [C.a2, "Swap", d.swapTot ? fmtBytes(d.swapUsed) + " / " + fmtBytes(d.swapTot) : "none"],
+        ];
+        rows.forEach((r, i) => {
+            let y = 306 + i * 20;
+            this._dot(cr, pad, y, r[0]);
+            this._text(cr, r[1], pad + 8, y, "l", C.label, 10.5);
+            this._text(cr, r[2], right, y, "r", C.text, 10.5);
+        });
+        sep(392);
+
+        // Top memory processes
+        this._tracked(cr, "PROCESSES", pad, 410, 9.2, C.label, 0.7, "l");
+        this._text(cr, "RSS", right, 410, "r", C.label, 9);
+        if (!d.topMem.length) this._text(cr, "collecting…", pad, 430, "l", C.label, 10.5);
+        d.topMem.forEach((p, i) => {
+            let y = 430 + i * 15;
+            this._text(cr, this._fit(cr, p[0], 190, 10.5), pad, y, "l", i ? C.label : C.text, 10.5);
+            this._text(cr, fmtBytes(p[1]), right, y, "r", i ? C.label : C.text, 10.5);
+        });
+    }
+
     _metric(cr, g, x, sparkX, label, pct, col, hist) {
-        if (g.labels) this._tracked(cr, label, x, g.labelY, 6.5, this.C.label, 0.5, "l");
-        this._text(cr, Math.round(pct) + "%", x, g.valueY, "l", this._pctColor(pct), 15, true);
+        if (g.labels) {
+            this._dot(cr, x, g.labelY, col);
+            this._tracked(cr, label, x + 8, g.labelY, 8, this.C.label, 0.5, "l");
+        }
+        this._text(cr, Math.round(pct) + "%", x, g.valueY, "l", this._pctColor(pct), 14, true);
         if (this.showSpark) this._spark(cr, sparkX, g.sparkY, g.sparkW, g.sparkH, hist, col, pct);
+    }
+
+    _dot(cr, x, y, col) {
+        this._col(cr, col);
+        cr.newPath(); cr.arc(x + 2, y - 2.6, 2.1, 0, 2 * Math.PI); cr.fill();
+    }
+
+    _ensureFlag(cc) {
+        if (!cc || cc === this._cc) return;
+        this._cc = cc;
+        this.flag = null;
+        let f = CACHE + "/flag-" + cc + ".png";
+        let load = () => { try { this.flag = Cairo.ImageSurface.createFromPNG(f); } catch (e) { } };
+        if (GLib.file_test(f, GLib.FileTest.EXISTS)) load();
+        else this._sh(`curl -s -m 8 -o '${f}' https://flagcdn.com/w40/${cc}.png && echo ok`, (o) => { if (o === "ok") load(); });
+    }
+
+    _drawFlag(cr, x, y, h) {
+        if (!this.flag) return 0;
+        let fw = this.flag.getWidth(), fh = this.flag.getHeight(), k = h / fh;
+        cr.save();
+        cr.translate(x, y);
+        cr.scale(k, k);
+        this._rrect(cr, 0, 0, fw, fh, 2 / k);
+        cr.clip();
+        cr.setSourceSurface(this.flag, 0, 0);
+        cr.paint();
+        cr.restore();
+        return fw * k;
     }
 
     _metricLoad(cr, g) {
         let C = this.C, d = this.d;
         let tn = Math.max(1, d.threads.length || 1);
         let pct = Math.max(0, Math.min(100, 100 * d.load1 / tn));
-        if (g.labels) this._tracked(cr, "LOAD", 12, g.labelY, 6.5, C.label, 0.5, "l");
-        this._text(cr, d.load1.toFixed(2), 12, g.valueY, "l", this._pctColor(pct), 15, true);
+        if (g.labels) {
+            this._dot(cr, 12, g.labelY, C.a1);
+            this._tracked(cr, "LOAD", 20, g.labelY, 8, C.label, 0.5, "l");
+        }
+        this._text(cr, d.load1.toFixed(2), 12, g.valueY, "l", this._pctColor(pct), 14, true);
     }
 
     _metricNet(cr, g) {
         let C = this.C, d = this.d;
-        if (g.labels) this._tracked(cr, "NET", 12, g.labelY, 6.5, C.label, 0.5, "l");
+        if (g.labels) {
+            this._dot(cr, 12, g.labelY, C.a1);
+            this._tracked(cr, "NET", 20, g.labelY, 8, C.label, 0.5, "l");
+        }
         let x = 12;
         x += this._arrowIcon(cr, x, g.valueY - 1, false, C.a1, 11) + 2;
         let dw = this._text(cr, fmtBytes(d.down, "/s"), x, g.valueY, "l", C.a1, 12, true);
@@ -890,14 +1022,37 @@ class CoreglowPanelApplet extends Applet.Applet {
 
     _metricUp(cr, g) {
         let C = this.C;
-        if (g.labels) this._tracked(cr, "UPTIME", 12, g.labelY, 6.5, C.label, 0.5, "l");
-        this._text(cr, this._upShort(), 12, g.valueY, "l", C.text, 15, true);
+        if (g.labels) {
+            this._dot(cr, 12, g.labelY, C.a1);
+            this._tracked(cr, "UPTIME", 20, g.labelY, 8, C.label, 0.5, "l");
+        }
+        this._text(cr, this._upShort(), 12, g.valueY, "l", C.text, 14, true);
     }
 
     _metricIp(cr, g) {
         let C = this.C, d = this.d;
-        if (g.labels) this._tracked(cr, "IP", 12, g.labelY, 6.5, C.label, 0.5, "l");
-        this._text(cr, d.ext || "—", 12, g.valueY, "l", C.text, 12.5, true);
+        if (g.labels) {
+            this._dot(cr, 12, g.labelY, C.a1);
+            this._tracked(cr, "IP", 20, g.labelY, 8, C.label, 0.5, "l");
+        }
+        let x = 12, fw = this._drawFlag(cr, x, g.valueY - 12, 11);
+        if (fw) x += fw + 6;
+        this._text(cr, d.ext || "—", x, g.valueY, "l", C.text, 12, true);
+    }
+
+    _metricTemp(cr, g) {
+        let C = this.C, d = this.d, t = d.cpuTemp;
+        if (g.labels) {
+            this._dot(cr, 12, g.labelY, this._tempColor(t));
+            this._tracked(cr, "TEMP", 20, g.labelY, 8, C.label, 0.5, "l");
+        }
+        this._text(cr, isNaN(t) ? "—" : Math.round(t) + "°", 12, g.valueY, "l", this._tempColor(t), 14, true);
+    }
+
+    _tempColor(t) {
+        let C = this.C;
+        if (isNaN(t)) return C.label;
+        return t >= 80 ? C.hot : t >= 60 ? C.warn : C.ok;
     }
 
     _upShort() {
@@ -919,7 +1074,6 @@ class CoreglowPanelApplet extends Applet.Applet {
             cr.paint();
             cr.setOperator(Cairo.Operator.OVER);
 
-            this._card(cr, g);
             let cpu = Math.max(0, Math.min(100, this.d.cpu || 0));
             let mem = Math.max(0, Math.min(100, this.d.memPct || 0));
 
@@ -927,6 +1081,7 @@ class CoreglowPanelApplet extends Applet.Applet {
             else if (this.mode === "net") this._metricNet(cr, g);
             else if (this.mode === "uptime") this._metricUp(cr, g);
             else if (this.mode === "ip") this._metricIp(cr, g);
+            else if (this.mode === "temp") this._metricTemp(cr, g);
             else {
                 this._metric(cr, g, g.cpuX, g.cpuSparkX, "CPU", cpu, C.a1, this.hCpu);
                 this._metric(cr, g, g.ramX, g.ramSparkX, "RAM", mem, C.a2, this.hMem);

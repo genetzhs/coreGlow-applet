@@ -13,19 +13,22 @@ One code base, **five modes** selected per instance with the `mode` setting:
 
 | mode | Panel item | Drop-down content |
 |---|---|---|
-| `cpumem` | `CPU` + big % + 60 s sparkline, `RAM` + big % + 60 s sparkline | CPU/RAM rings, CLK/load/threads, per-core bars, RAM+SWAP bars, used/cached/free stacked bar |
+| `cpumem` | `CPU` + big % + 60 s sparkline, `RAM` + big % + 60 s sparkline | iStat-Menus layout: clock+temp, 60 s bar history, user/system split, per-core ring grid, USED/PRESSURE rings, used/cached/free/swap list, top RSS processes |
 | `load` | `LOAD` + 1-minute load (no graph — it duplicated the CPU one) | 1/5/15 min bars normalised to thread count, CPU usage + history, per-core bars, top 4 processes |
 | `net` | `NET` + down/up rates with drawn arrows | down/up rates, 60 s down+up graph, totals, LAN/PUBLIC/GATEWAY/DNS |
 | `uptime` | `UPTIME` + `6d 21h` | uptime, boot time, load bars, process count, CPU/RAM summary |
-| `ip` | `IP` + public IP | public IP large, LAN/interface/gateway/DNS/ping |
+| `ip` | `IP` + country flag + public IP | public IP large with flag, LAN/interface/gateway/DNS/ping |
+| `temp` | `TEMP` + CPU temperature (green < 60°, amber < 80°, red ≥ 80°) | temp ring, min/avg/max over 2 min, 2 min graph, fan rpm, NVMe temp |
 
 All values refresh every 1 s (`Mainloop.timeout_add_seconds`). The drop-down is a
 `St.DrawingArea` inside an `AppletPopupMenu`, drawn at `MENU_SCALE = 1.2`.
+There is **no surrounding card** on the panel item — only accent dot + label + value
+(+ sparkline in `cpumem`).
 
 ## Files
 
 - `applet.js` — everything: data collection, Cairo drawing, menu logic (~950 lines).
-- `settings-schema.json` — `mode`, `theme`, `bgAlpha`, `accent1`, `accent2`, `showSpark`, `showLabels`, `hoverOpen`, `hotAt`.
+- `settings-schema.json` — `mode`, `theme`, `accent1`, `accent2`, `showSpark`, `showLabels`, `hoverOpen`, `hotAt`.
 - `metadata.json` — uuid, name, version.
 - `stylesheet.css` — removes the theme's applet-box padding/hover so the Cairo card is the only background.
 - `context.md` — this file.
@@ -52,10 +55,11 @@ Instances on the development machine (25 Nov 2026):
 | 30 | net | `panel1:right:8` |
 | 31 | uptime | `panel1:right:3` |
 | 32 | ip | `panel1:right:4` |
+| 33 | temp | `panel1:right:5` |
 
 They replaced (still installed, just not enabled): `hwmonitor@sylfurd`,
 `bash-sensors@pkkk`, `download-and-upload-speed@cardsurf`, `uptime@vatanuki.kun`,
-`ipindicator@matus.benko@gmail.com`. `temperature@fevimu` is still in use.
+`ipindicator@matus.benko@gmail.com`, `temperature@fevimu`.
 
 ## Interaction model
 
@@ -82,6 +86,12 @@ They replaced (still installed, just not enabled): `hwmonitor@sylfurd`,
 | Interface/LAN/gateway/DNS | `ip route`, `ip addr`, `/etc/resolv.conf` | 10 s, net/ip modes |
 | Ping | `ping -c1 -W2 1.1.1.1` | 5 s, net/ip modes |
 | Public IP | `https://ipinfo.io/json` | first tick + every 10 min, net/ip modes |
+| Country flag | `j.country` → `https://flagcdn.com/w40/<cc>.png`, cached in `~/.cache/coreglow` | on country change, ip mode |
+| CPU temperature | max `temp*_input` of the coretemp/k10temp/zenpower hwmon | 5 s, cpumem |
+| Memory pressure | `/proc/pressure/memory` `some avg10` | 5 s, cpumem |
+| Top RSS processes | `ps -eo comm=,rss= --sort=-rss | head -4` | 10 s, cpumem |
+| Fan / NVMe temp | hwmon `fan1_input`, `nvme/temp1_input` | 5 s, temp mode |
+| Panel value font | 14 px (load, uptime, cpu, ram, temp) | — |
 
 Shell calls go through `_sh()` → `Util.spawn_async(["bash","-c",...])`, so keep quoting intact.
 
@@ -93,8 +103,13 @@ Palette `DARK`/`LIGHT` + `accent1` (cyan, CPU/download) and `accent2` (violet, R
 `_window()` converts the 120-sample ring buffers into a fixed-width, NaN-left-padded series.
 
 - **Noto Sans has no ↓/↑ glyphs in Cairo** — arrows are drawn with `_arrowIcon`, never text.
+- No card is drawn around the panel item (the old `_card` was removed, `bgAlpha` is gone).
 - Panel item widths are fixed constants per mode (`W_FULL`, `W_LOAD_MINI`, `W_NET`, `W_UP`, `W_IP`).
-- Menu height is per mode (`MH`, `MH_LOAD`, `MH_NET`, `MH_UP`, `MH_IP`) and scaled by `MENU_SCALE`.
+- Menu height is per mode (`MH = 486`, `MH_LOAD`, `MH_NET`, `MH_UP`, `MH_IP`) and scaled by `MENU_SCALE`.
+- `cpumem` popup is the iStat-style one: `_barHistory` (60 vertical bars), `_coreRings`
+  (small per-core rings in two rows), USED/PRESSURE rings, breakdown list, top RSS processes.
+- `_dot` draws the accent dot before panel labels; `_ensureFlag` / `_drawFlag` fetch and draw
+  the country flag (rounded clip, PNG cache shared with the desklet).
 
 ## Editing / reloading
 
@@ -124,5 +139,5 @@ Gotchas already hit:
 
 ## Possible next steps
 
-Per-core bars in the panel item, GPU/temperature mode, top processes in `cpumem`,
-Wi-Fi SSID/signal in `net`, copy-IP button, country flag in `ip`, configurable ping host and history length.
+Per-core bars in the panel item, GPU mode, Wi-Fi SSID/signal in `net`, copy-IP button,
+configurable ping host and history length, top CPU processes in `cpumem`.
