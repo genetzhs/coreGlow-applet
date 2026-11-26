@@ -21,8 +21,9 @@ const W_LOAD = 152;        // load mode: label + value + sparkline
 const W_LOAD_MINI = 64;    // load mode: label + value (compact)
 const W_NET = 112;         // network: down over up (two rows)
 const W_UP = 84;           // uptime (compact)
-const W_IP = 150;          // public IP (flag + full address)
+const W_IP = 168;          // public IP (flag + full address)
 const W_TEMP = 64;         // temperature (compact)
+const WX_LABEL = 10.5;      // weather place-name size
 const W_WX = 112;          // weather: icon + place + temp
 const MW = 300, MH = 590;  // drop-down body (CSS px)
 const MH_LOAD = 368;       // drop-down body in load mode
@@ -46,7 +47,7 @@ const LIGHT = {
     text: [25, 28, 38, 1], label: [72, 80, 98, 1],
     track: [0, 0, 0, 0.08], base: [0, 0, 0, 0.06], divider: [0, 0, 0, 0.06],
 };
-const FIXED = { ok: [40, 230, 120, 1], warn: [255, 190, 30, 1], hot: [255, 75, 85, 1], sun: [255, 196, 60, 1], rain: [80, 170, 255, 1], down: [60, 190, 255, 1], up: [255, 140, 30, 1] };
+const FIXED = { ok: [40, 230, 120, 1], warn: [255, 190, 30, 1], hot: [255, 75, 85, 1], sun: [255, 196, 60, 1], rain: [80, 170, 255, 1], down: [0, 229, 255, 1], up: [255, 46, 136, 1] };
 const WX_UA = "coreglow-panel/1.1";
 
 function readFile(path) {
@@ -893,8 +894,19 @@ class CoreglowPanelApplet extends Applet.Applet {
         let m = this._rainIn();
         if (m !== null && m <= 120) this._drop(cr, 4 + s - 2, H - 7, 3, C.rain);   // rain soon badge
         let x = 10 + s;
-        if (g.labels) this._plabel(cr, this._fit(cr, this._upper(this.wxPlace || "WEATHER"), g.W - x - 4, 9.5, true), x, g.labelY);
-        this._text(cr, w ? Math.round(w.t) + "°" : "—", x, g.valueY, "l", w ? C.text : C.label, 14, true);
+        let place = this._upper(this.wxPlace || "WEATHER");
+        let lw = 0;                                          // same metrics as _plabel (bold, +0.6 tracking)
+        if (g.labels) {
+            cr.selectFontFace(FONT, Cairo.FontSlant.NORMAL, Cairo.FontWeight.BOLD); cr.setFontSize(WX_LABEL);
+            for (let ch of place) lw += cr.textExtents(ch).xAdvance + 0.6;
+        }
+        lw = Math.min(lw, 120);
+        let temp = w ? Math.round(w.t) + "°" : "—";
+        let tw = this._textW(cr, temp, 14, true);
+        let colW = Math.max(lw, tw);
+        this._fitW(Math.ceil(x + colW + 11));               // right pad → ~25px gap to the next item
+        if (g.labels) this._plabel(cr, this._fit(cr, place, g.W - x - 4, WX_LABEL, true), x, g.labelY, WX_LABEL);
+        this._text(cr, temp, x, g.valueY, "l", w ? C.text : C.label, 14, true);
     }
 
     _tooltip() {
@@ -1535,10 +1547,10 @@ class CoreglowPanelApplet extends Applet.Applet {
     }
 
     // panel labels: a bit larger, bold, brighter than the menu labels
-    _plabel(cr, label, x, y) {
+    _plabel(cr, label, x, y, size) {
         let C = this.C, col = [0, 1, 2].map(i => Math.round(C.label[i] * 0.25 + C.text[i] * 0.75)).concat([1]);
         cr.selectFontFace(FONT, Cairo.FontSlant.NORMAL, Cairo.FontWeight.BOLD);
-        cr.setFontSize(9.5);
+        cr.setFontSize(size || 9.5);
         this._col(cr, col);
         for (let ch of label) { cr.moveTo(x, y); cr.showText(ch); x += cr.textExtents(ch).xAdvance + 0.6; }
     }
@@ -1622,17 +1634,31 @@ class CoreglowPanelApplet extends Applet.Applet {
         this._text(cr, this._upShort(), g.W / 2 + 4, g.valueY, "c", C.text, 14, true);
     }
 
+    // content-sized items: ask for a new width, applied on idle (not during repaint)
+    _fitW(need) {
+        if (!this.geo || Math.abs(need - this.geo.W) <= 1 || this._fitPending) return;
+        this._fitPending = Mainloop.idle_add(() => {
+            this._fitPending = 0;
+            if (!this.canvas || !this.geo) return false;
+            this.geo.W = need;
+            this.canvas.set_size(need, this.geo.H);
+            this.canvas.queue_repaint();
+            return false;
+        });
+    }
+
     _metricIp(cr, g) {
         let C = this.C, d = this.d;
-        // no label: flag + address centred in the item
+        // no label: flag + address, item width fitted to content
         let ip = d.ext || "—";
-        this._font(cr, 12, true);
+        this._font(cr, 14, true);
         let tw = cr.textExtents(ip).xAdvance;
-        let fw = this.flag ? this.flag.getWidth() * 11 / this.flag.getHeight() : 0;
-        let total = tw + (fw ? fw + 6 : 0);
-        let x = Math.round((g.W - total) / 2), base = Math.round(g.H / 2 + 4.5);
-        if (fw) { this._drawFlag(cr, x, base - 10, 11); x += fw + 6; }
-        this._text(cr, ip, x, base, "l", C.text, 12, true);
+        let fw = this.flag ? this.flag.getWidth() * 13 / this.flag.getHeight() : 0;
+        let total = tw + (fw ? fw + 7 : 0);
+        this._fitW(Math.ceil(total) + 12);
+        let x = 6, base = Math.round(g.H / 2 + 5);
+        if (fw) { this._drawFlag(cr, x, base - 11.5, 13); x += fw + 7; }
+        this._text(cr, ip, x, base, "l", C.text, 14, true);
     }
 
     _metricTemp(cr, g) {

@@ -137,6 +137,8 @@ Gotchas already hit:
   Recover without restarting Cinnamon:
   `let x=imports.ui.extension.getExtension(UUID); imports.misc.fileUtils.requireModule(x.dir.get_path()+'/applet.js', x.dir.get_path(), x.meta, 'applet');`
   then `appletManager.addAppletToPanels(x, def)` for each `appletManager.definitions` entry with that uuid.
+  Simpler, verified 2026-11-26 on Cinnamon 6.0.5 (DBus `ReloadXlet` hits the same bug): unload + load restores all instances:
+  `(function(){var x=imports.ui.extension;x.unloadExtension(UUID,x.Type.APPLET,false,false);x.loadExtension(UUID,x.Type.APPLET);return 'ok'})()`
 - Colour ramps (`_mix`) interpolate in **HSV**; RGB blending of green→amber produced muddy olive on the panel.
 - `gdbus call` mis-parses JS arguments (GVariant); use `busctl --user call ... Eval s '<js>'`.
 - Screenshot checks: `gnome-screenshot -f x.png` + `convert x.png -crop WxH+X+Y`. Panel is at the
