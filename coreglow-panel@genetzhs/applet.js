@@ -12,34 +12,42 @@ const Gio = imports.gi.Gio;
 const Cairo = imports.cairo;
 
 const UUID = "coreglow-panel@genetzhs";
-const FONT = "Noto Sans";
+const FONT = "Roboto";
+const FONT_MED = "Roboto Medium";   // bold text: medium weight, tabular digits
 const HIST = 120;          // seconds of history kept in the ring buffers
-const W_FULL = 238;        // labels + values + sparklines
+const W_FULL = 298;        // labels + values + sparklines
 const W_MINI = 126;        // labels + values only
 const W_LOAD = 152;        // load mode: label + value + sparkline
 const W_LOAD_MINI = 64;    // load mode: label + value (compact)
-const W_NET = 185;         // network: down / up
+const W_NET = 112;         // network: down over up (two rows)
 const W_UP = 84;           // uptime (compact)
 const W_IP = 150;          // public IP (flag + full address)
 const W_TEMP = 64;         // temperature (compact)
-const MW = 300, MH = 486;  // drop-down body (CSS px)
+const W_WX = 112;          // weather: icon + place + temp
+const MW = 300, MH = 590;  // drop-down body (CSS px)
 const MH_LOAD = 368;       // drop-down body in load mode
-const MH_NET = 300, MH_UP = 250, MH_IP = 240, MH_TEMP = 240;
+const MH_NET = 300, MH_UP = 250, MH_IP = 240, MH_TEMP = 262, MH_WX = 380;
 const MENU_SCALE = 1.2;    // drop-down zoom (window + text)
 const INSTANCES = new Set();
 const STYLE = "coreglow-panel-applet";
+// per-mode accent: header dot, menu border glow
+const MODE_ACCENT = {
+    cpumem: [0, 200, 255], load: [150, 110, 255], net: [70, 215, 120], uptime: [90, 150, 255],
+    ip: [40, 210, 200], temp: [255, 140, 60], weather: [255, 196, 60],
+};
 
 const DARK = {
     bgTop: [28, 24, 44], bg: [18, 20, 28], border: [255, 255, 255, 0.11],
-    text: [235, 238, 245, 1], label: [150, 158, 175, 1],
+    text: [248, 250, 255, 1], label: [196, 204, 220, 1],
     track: [255, 255, 255, 0.09], base: [255, 255, 255, 0.07], divider: [255, 255, 255, 0.07],
 };
 const LIGHT = {
     bgTop: [236, 238, 248], bg: [248, 249, 252], border: [0, 0, 0, 0.10],
-    text: [25, 28, 38, 1], label: [96, 104, 122, 1],
+    text: [25, 28, 38, 1], label: [72, 80, 98, 1],
     track: [0, 0, 0, 0.08], base: [0, 0, 0, 0.06], divider: [0, 0, 0, 0.06],
 };
-const FIXED = { ok: [60, 200, 130, 1], warn: [255, 170, 40, 1], hot: [255, 70, 80, 1] };
+const FIXED = { ok: [40, 230, 120, 1], warn: [255, 190, 30, 1], hot: [255, 75, 85, 1], sun: [255, 196, 60, 1], rain: [80, 170, 255, 1], down: [60, 190, 255, 1], up: [255, 140, 30, 1] };
+const WX_UA = "coreglow-panel/1.1";
 
 function readFile(path) {
     try {
@@ -60,6 +68,18 @@ function fmtBytes(b, suffix) {
 function parseColor(s, fallback) {
     let m = (s || "").match(/rgba?\(\s*(\d+)\s*,\s*(\d+)\s*,\s*(\d+)/);
     return m ? [+m[1], +m[2], +m[3], 1] : fallback;
+}
+
+function rgb2hsv(c) {
+    let r = c[0] / 255, g = c[1] / 255, b = c[2] / 255;
+    let mx = Math.max(r, g, b), mn = Math.min(r, g, b), d = mx - mn, h = 0;
+    if (d) h = mx === r ? ((g - b) / d) % 6 : mx === g ? (b - r) / d + 2 : (r - g) / d + 4;
+    return [(h * 60 + 360) % 360, mx ? d / mx : 0, mx];
+}
+
+function hsv2rgb(c) {
+    let [h, s, v] = c, f = n => { let k = (n + h / 60) % 6; return v - v * s * Math.max(0, Math.min(k, 4 - k, 1)); };
+    return [f(5), f(3), f(1)].map(x => Math.round(x * 255)).concat([1]);
 }
 
 function ring(n) { return { a: new Array(n).fill(NaN), i: 0, n }; }
@@ -91,7 +111,13 @@ class CoreglowPanelApplet extends Applet.Applet {
 
         this._meta = metadata;
         this._ph = panelHeight;
-        this.d = { cpu: 0, threads: [], memUsed: 0, memTot: 0, memPct: 0, swapUsed: 0, swapTot: 0, cached: 0, load: "", mhz: 0, host: GLib.get_host_name(), load1: 0, load5: 0, load15: 0, uptime: "", top: [], upSec: 0, procs: 0, iface: "", lan: "", ext: "", gateway: "", dns: "", ping: "", down: 0, upl: 0, totDown: 0, totUp: 0, cpuTemp: NaN, userPct: 0, sysPct: 0, pressure: NaN, topMem: [], cc: "", fan: NaN, nvmeTemp: NaN };
+        this.d = { cpu: 0, threads: [], memUsed: 0, memTot: 0, memPct: 0, swapUsed: 0, swapTot: 0, cached: 0, load: "", mhz: 0, host: GLib.get_host_name(), load1: 0, load5: 0, load15: 0, uptime: "", top: [], upSec: 0, procs: 0, iface: "", lan: "", ext: "", gateway: "", dns: "", ping: "", down: 0, upl: 0, totDown: 0, totUp: 0, cpuTemp: NaN, userPct: 0, sysPct: 0, pressure: NaN, topMem: [], cc: "", fan: NaN, nvmeTemp: NaN, gpuTemp: NaN, acpiTemp: NaN, topCpu: [] };
+        this.wx = null; this.wxAt = 0; this.wxKey = ""; this.sun = null; this.sunDay = "";
+        this.vis = {}; this.tgt = {}; this._animId = 0;
+        this.hits = []; this.killArm = null; this.killMsg = "";
+        this.hGpu = ring(HIST); this.hAcpi = ring(HIST); this.hNvme = ring(HIST);
+        this.hwAcpi = hwmonBy(n => n === "acpitz");
+        this.hasNvidia = GLib.find_program_in_path("nvidia-smi") !== null;
         this.hCpu = ring(HIST);
         this.hMem = ring(HIST);
         this.hLoad = ring(HIST);
@@ -100,6 +126,11 @@ class CoreglowPanelApplet extends Applet.Applet {
         this.hTemp = ring(HIST);
         this.prevNet = null;
         this.hwTemp = hwmonBy(n => ["coretemp", "k10temp", "zenpower"].includes(n));
+        this.tempFiles = [];
+        if (this.hwTemp) for (let i = 1; i < 32; i++) {
+            let f = `${this.hwTemp}/temp${i}_input`;
+            if (GLib.file_test(f, GLib.FileTest.EXISTS)) this.tempFiles.push(f);
+        }
         this.hwFan = hwmonBy((n, p) => GLib.file_test(p + "/fan1_input", GLib.FileTest.EXISTS));
         this.hwNvme = hwmonBy(n => n === "nvme");
         this._cc = null;
@@ -110,7 +141,7 @@ class CoreglowPanelApplet extends Applet.Applet {
         this.sysDark = this._sysDark();
 
         this.settings = new Settings.AppletSettings(this, UUID, instanceId);
-        for (let k of ["mode", "theme", "accent1", "accent2", "showSpark", "showLabels", "hoverOpen", "hotAt"])
+        for (let k of ["mode", "interval", "theme", "accent1", "accent2", "showSpark", "showLabels", "hoverOpen", "hotAt", "wxPlace", "wxLat", "wxLon", "wxMins"])
             this.settings.bind(k, k, () => this._onSettings());
 
         this.canvas = new St.DrawingArea();
@@ -136,25 +167,43 @@ class CoreglowPanelApplet extends Applet.Applet {
         this.menuCanvas = new St.DrawingArea();
         this.menuCanvas.connect("repaint", (area) => this._drawMenu(area));
         this.menuCanvas.set_size(MW, MH);
+        this.menuCanvas.reactive = true;
+        this.menuCanvas.connect("button-release-event", (a, e) => this._menuClick(a, e));
         let section = new PopupMenu.PopupMenuSection();
         let itemBody = new PopupMenu.PopupBaseMenuItem({ reactive: false });
         itemBody.addActor(this.menuCanvas, { span: 2 });
         section.addMenuItem(itemBody);
         this.menu.addMenuItem(section);
-        let itemOpen = new PopupMenu.PopupMenuItem(_("Open System Monitor"));
-        itemOpen.connect("activate", () => Util.spawnCommandLine("gnome-system-monitor"));
+        let itemOpen = this._itemOpen = new PopupMenu.PopupMenuItem(_("Open System Monitor"));
+        itemOpen.connect("activate", () => {
+            if (this.mode === "weather") Util.spawnCommandLine(`xdg-open https://www.yr.no/en/forecast/daily-table/${this._wxLat()},${this._wxLon()}`);
+            else Util.spawnCommandLine("gnome-system-monitor");
+        });
         this.menu.addMenuItem(itemOpen);
+        this.menu.connect("open-state-changed", (m, isOpen) => {
+            this.canvas.queue_repaint();
+            if (isOpen) this._update(true);
+        });
         this.menu.actor.connect("enter-event", () => { this._cancelClose(); return false; });
         this.menu.actor.connect("leave-event", () => { this._scheduleClose(); return false; });
 
         this._onSettings();
         this._update(true);
-        this._timer = Mainloop.timeout_add_seconds(1, () => { this._update(); return true; });
+        this._restartTimer();
         INSTANCES.add(this);
+    }
+
+    _restartTimer() {
+        let iv = Math.max(1, Math.min(30, Math.round(this.interval || 1)));
+        if (this._timer && this._iv === iv) return;
+        if (this._timer) Mainloop.source_remove(this._timer);
+        this._iv = iv;
+        this._timer = Mainloop.timeout_add_seconds(iv, () => { this._update(); return true; });
     }
 
     on_applet_removed_from_panel() {
         if (this._timer) { Mainloop.source_remove(this._timer); this._timer = 0; }
+        if (this._animId) { Mainloop.source_remove(this._animId); this._animId = 0; }
         this._cancelClose();
         INSTANCES.delete(this);
     }
@@ -218,12 +267,16 @@ class CoreglowPanelApplet extends Applet.Applet {
     // ---------- settings / palette ----------
     _onSettings() {
         if (!this.canvas) return;
+        if (this._timer) this._restartTimer();
         this._palette();
         this._layout();
         this.canvas.queue_repaint();
         if (this.menuCanvas) this.menuCanvas.queue_repaint();
         // no hover UI: details open on click only (hoverOpen is opt-in)
         this._applet_tooltip.preventShow = true;
+        this._menuStyle();
+        if (this._itemOpen) this._itemOpen.label.set_text(this.mode === "weather" ? _("Open forecast (yr.no)") : _("Open System Monitor"));
+        if (this.mode === "weather") this._wxTick(true);
         this._tooltip();
     }
 
@@ -259,9 +312,10 @@ class CoreglowPanelApplet extends Applet.Applet {
             : this.mode === "uptime" ? W_UP
             : this.mode === "ip" ? W_IP
             : this.mode === "temp" ? W_TEMP
+            : this.mode === "weather" ? W_WX
             : (this.showSpark ? W_FULL : W_MINI);
         this.canvas.set_size(W, H);
-        let mh = { load: MH_LOAD, net: MH_NET, uptime: MH_UP, ip: MH_IP, temp: MH_TEMP }[this.mode] || MH;
+        let mh = { load: MH_LOAD, net: MH_NET, uptime: MH_UP, ip: MH_IP, temp: MH_TEMP, weather: MH_WX }[this.mode] || MH;
         if (this.menuCanvas) this.menuCanvas.set_size(
             Math.round(MW * MENU_SCALE),
             Math.round(mh * MENU_SCALE));
@@ -271,7 +325,7 @@ class CoreglowPanelApplet extends Applet.Applet {
         let g = {
             W, H, inset, ch,
             labels: !!this.showLabels,
-            labelY: inset + 9,
+            labelY: inset + 10,
             valueY: inset + ch - 4,
             sparkY: inset + 5,
             sparkH: ch - 10,
@@ -281,10 +335,10 @@ class CoreglowPanelApplet extends Applet.Applet {
         } else if (this.showSpark) {
             g.cpuX = 12;
             g.cpuSparkX = 52;
-            g.sparkW = 60;
-            g.divX = 118;
-            g.ramX = 126;
-            g.ramSparkX = 166;
+            g.sparkW = 90;
+            g.divX = 148;
+            g.ramX = 156;
+            g.ramSparkX = 196;
         } else {
             g.cpuX = 12;
             g.divX = 64;
@@ -295,85 +349,98 @@ class CoreglowPanelApplet extends Applet.Applet {
 
     // ---------- data ----------
     _update(first) {
-        let d = this.d, t = ++this.tick;
+        let d = this.d, t = ++this.tick, m = this.mode, open = !!(this.menu && this.menu.isOpen);
+        // Only collect what this instance shows; expensive extras only while the drop-down is open.
+        let needCpu = m === "cpumem" || m === "load" || (m === "uptime" && open);
+        let needMem = m === "cpumem" || (m === "uptime" && open);
+        let needLoad = m === "load" || m === "uptime";
+        let needTemp = m === "temp" || (m === "cpumem" && open);
 
-        let stat = (readFile("/proc/stat") || "").split("\n").filter(l => /^cpu\d* /.test(l))
-            .map(l => {
-                let v = l.trim().split(/\s+/).slice(1).map(Number);
-                return [v.reduce((a, b) => a + b, 0), v[3] + (v[4] || 0), v[0] + v[1], v[2] + (v[5] || 0) + (v[6] || 0)];
-            });
-        if (this.prevStat && this.prevStat.length === stat.length) {
-            let pct = stat.map((s, i) => {
-                let dt = s[0] - this.prevStat[i][0], di = s[1] - this.prevStat[i][1];
-                return dt > 0 ? 100 * (dt - di) / dt : 0;
-            });
-            d.cpu = pct[0];
-            d.threads = pct.slice(1);
-            let dt = stat[0][0] - this.prevStat[0][0];
-            if (dt > 0) {
-                d.userPct = 100 * (stat[0][2] - this.prevStat[0][2]) / dt;
-                d.sysPct = 100 * (stat[0][3] - this.prevStat[0][3]) / dt;
+        if (needCpu) {
+            let stat = (readFile("/proc/stat") || "").split("\n").filter(l => /^cpu\d* /.test(l))
+                .map(l => {
+                    let v = l.trim().split(/\s+/).slice(1).map(Number);
+                    return [v.reduce((a, b) => a + b, 0), v[3] + (v[4] || 0), v[0] + v[1], v[2] + (v[5] || 0) + (v[6] || 0)];
+                });
+            if (this.prevStat && this.prevStat.length === stat.length) {
+                let pct = stat.map((s, i) => {
+                    let dt = s[0] - this.prevStat[i][0], di = s[1] - this.prevStat[i][1];
+                    return dt > 0 ? 100 * (dt - di) / dt : 0;
+                });
+                d.cpu = pct[0];
+                d.threads = pct.slice(1);
+                let dt = stat[0][0] - this.prevStat[0][0];
+                if (dt > 0) {
+                    d.userPct = 100 * (stat[0][2] - this.prevStat[0][2]) / dt;
+                    d.sysPct = 100 * (stat[0][3] - this.prevStat[0][3]) / dt;
+                }
+                push(this.hCpu, d.cpu);
             }
-            push(this.hCpu, d.cpu);
+            this.prevStat = stat;
         }
-        this.prevStat = stat;
+        if (!d.threads.length && needLoad) d.threads = new Array(GLib.get_num_processors()).fill(0);
 
-        let mi = {};
-        (readFile("/proc/meminfo") || "").split("\n").forEach(l => { let m = l.match(/^(\w+):\s+(\d+)/); if (m) mi[m[1]] = +m[2] * 1024; });
-        d.memTot = mi.MemTotal || 0;
-        d.memUsed = d.memTot - (mi.MemAvailable || d.memTot);
-        d.memPct = d.memTot ? 100 * d.memUsed / d.memTot : 0;
-        d.swapTot = mi.SwapTotal || 0;
-        d.swapUsed = d.swapTot - (mi.SwapFree || 0);
-        d.cached = (mi.Cached || 0) + (mi.SReclaimable || 0);
-        push(this.hMem, d.memPct);
+        if (needMem) {
+            let mi = {};
+            (readFile("/proc/meminfo") || "").split("\n").forEach(l => { let mm = l.match(/^(\w+):\s+(\d+)/); if (mm) mi[mm[1]] = +mm[2] * 1024; });
+            d.memTot = mi.MemTotal || 0;
+            d.memUsed = d.memTot - (mi.MemAvailable || d.memTot);
+            d.memPct = d.memTot ? 100 * d.memUsed / d.memTot : 0;
+            d.swapTot = mi.SwapTotal || 0;
+            d.swapUsed = d.swapTot - (mi.SwapFree || 0);
+            d.cached = (mi.Cached || 0) + (mi.SReclaimable || 0);
+            push(this.hMem, d.memPct);
+        }
 
-        let la = (readFile("/proc/loadavg") || "").trim().split(/\s+/);
-        if (la.length >= 3) { d.load1 = +la[0] || 0; d.load5 = +la[1] || 0; d.load15 = +la[2] || 0; }
-        let tn = Math.max(1, d.threads.length || 1);
-        push(this.hLoad, Math.max(0, Math.min(100, 100 * d.load1 / tn)));
+        if (needLoad || m === "cpumem") {
+            let la = (readFile("/proc/loadavg") || "").trim().split(/\s+/);
+            if (la.length >= 3) { d.load1 = +la[0] || 0; d.load5 = +la[1] || 0; d.load15 = +la[2] || 0; d.load = la[0]; }
+        }
 
-        if (this.hwTemp) {
+        if (needTemp && this.tempFiles.length) {
             let max = NaN;
-            for (let i = 1; i < 32; i++) { let v = readNum(`${this.hwTemp}/temp${i}_input`); if (!isNaN(v) && !(v <= max)) max = v; }
+            for (let f of this.tempFiles) { let v = readNum(f); if (!isNaN(v) && !(v <= max)) max = v; }
             d.cpuTemp = max / 1000;
             if (!isNaN(d.cpuTemp)) push(this.hTemp, d.cpuTemp);
         }
+        if (m === "temp" && open) this._tempSensors(t);
 
-        if (this.mode === "net" || this.mode === "ip") this._netTick(t);
-        if (this.mode === "uptime" || this.mode === "load") {
-            let up = readNum("/proc/uptime");
-            if (!isNaN(up)) d.upSec = up;
-            if (t % 10 === 0) this._sh("ls -d /proc/[0-9]* 2>/dev/null | wc -l", (o) => { d.procs = +o || 0; });
-        }
+        if (m === "uptime" || m === "load") { let up = readNum("/proc/uptime"); if (!isNaN(up)) d.upSec = up; }
+        if (m === "net" || m === "ip") this._netTick(t, open);
+        if (m === "weather") { this._wxTick(false); this._rainNotify(); }
 
-        if (t % 5 === 0) {
-            d.load = la[0] || d.load;
-            let up = readNum("/proc/uptime");
-            if (!isNaN(up)) d.uptime = `${Math.floor(up / 86400)}d ${String(Math.floor(up % 86400 / 3600)).padStart(2, "0")}h`;
-            let mh = (readFile("/proc/cpuinfo") || "").match(/cpu MHz\s*:\s*[\d.]+/g) || [];
-            d.mhz = mh.reduce((a, s) => Math.max(a, parseFloat(s.split(":")[1])), 0);
-            d.fan = this.hwFan ? readNum(this.hwFan + "/fan1_input") : NaN;
-            d.nvmeTemp = this.hwNvme ? readNum(this.hwNvme + "/temp1_input") / 1000 : NaN;
-            let pm = (readFile("/proc/pressure/memory") || "").match(/some avg10=([\d.]+)/);
-            d.pressure = pm ? parseFloat(pm[1]) : NaN;
+        if (open && (first || t % 5 === 0)) {
+            if (m === "cpumem" || m === "temp") {
+                let mh = (readFile("/proc/cpuinfo") || "").match(/cpu MHz\s*:\s*[\d.]+/g) || [];
+                d.mhz = mh.reduce((a, s) => Math.max(a, parseFloat(s.split(":")[1])), 0);
+                d.fan = this.hwFan ? readNum(this.hwFan + "/fan1_input") : NaN;
+                let pm = (readFile("/proc/pressure/memory") || "").match(/some avg10=([\d.]+)/);
+                d.pressure = pm ? parseFloat(pm[1]) : NaN;
+            }
+            if (m === "uptime" || m === "load")
+                this._sh("ls -d /proc/[0-9]* 2>/dev/null | wc -l", (o) => { d.procs = +o || 0; });
+            if (m === "cpumem")
+                this._sh("ps -eo comm=,rss= --sort=-rss | head -4", (out) => {
+                    d.topMem = out.split("\n").filter(l => l).map(l => { let p = l.trim().split(/\s+/); return [p[0], (+p[1] || 0) * 1024]; });
+                });
+            if ((m === "cpumem" || m === "load") && !this._topBusy) {
+                this._topBusy = true;
+                this._sh("ps -eo pid=,pcpu=,comm= --sort=-pcpu | head -5", (out) => {
+                    this._topBusy = false;
+                    let rows = out.split("\n").filter(l => l).map(l => { let p = l.trim().split(/\s+/); return { pid: parseInt(p[0]) || 0, cpu: parseFloat(p[1]) || 0, name: p.slice(2).join(" ") }; }).filter(p => p.pid > 0);
+                    d.topCpu = rows;
+                    d.top = rows.slice(0, 4).map(p => [p.name, p.cpu]);
+                });
+            }
         }
-        if (this.mode === "cpumem" && t % 10 === 0)
-            this._sh("ps -eo comm=,rss= --sort=-rss | head -4", (out) => {
-                d.topMem = out.split("\n").filter(l => l).map(l => { let p = l.trim().split(/\s+/); return [p[0], (+p[1] || 0) * 1024]; });
-            });
-        if (this.mode === "load" && t % 5 === 0)
-            this._sh("top -b -n2 -d0.5 -o %CPU -w 512 | awk '/^ *PID/{n++;next} n==2{print $12\" \"$9; if(++c==4) exit}'", (out) => {
-                d.top = out.split("\n").filter(l => l).map(l => { let p = l.split(" "); return [p[0], parseFloat(p[1]) || 0]; });
-            });
-        if (t % 15 === 0) {
+        if (t % 30 === 0) {
             let dark = this._sysDark();
-            if (dark !== this.sysDark) { this.sysDark = dark; this._palette(); }
+            if (dark !== this.sysDark) { this.sysDark = dark; this._palette(); this._sig = null; this._menuStyle(); }
         }
 
-        this.canvas.queue_repaint();
-        if (this.menuCanvas) this.menuCanvas.queue_repaint();
-        if (first || t % 2 === 0) this._tooltip();
+        this._animate();
+        if (open && this.menuCanvas) this.menuCanvas.queue_repaint();
+        if (first || t % 5 === 0) this._tooltip();
     }
 
     // ---------- data helpers ----------
@@ -382,43 +449,461 @@ class CoreglowPanelApplet extends Applet.Applet {
         catch (e) { }
     }
 
-    _netTick(t) {
+    _netTick(t, open) {
         let d = this.d;
         if (t === 1 || t % 10 === 0) {
+            // physical default route for traffic; `ip route get` follows policy routing (WireGuard/Tailscale)
             this._sh("dev=$(ip -4 route show default | sort -t' ' -k9 -n | head -1 | sed -n 's/.* dev \\([^ ]*\\).*/\\1/p'); " +
                 "echo \"$dev\"; ip -4 -o addr show dev \"$dev\" | awk '{print $4}' | cut -d/ -f1 | head -1; " +
-                "ip -4 route show default | awk 'NR==1{print $3}'; awk '/^nameserver/{print $2; exit}' /etc/resolv.conf",
+                "ip -4 route show default | awk 'NR==1{print $3}'; awk '/^nameserver/{print $2; exit}' /etc/resolv.conf; " +
+                "ip -4 route get 1.1.1.1 2>/dev/null | head -1",
                 (out) => {
-                    let [iface, lan, gw, dns] = out.split("\n");
+                    let [iface, lan, gw, dns, rt] = out.split("\n");
                     if (iface !== d.iface) this.prevNet = null;
                     d.iface = iface || ""; d.lan = lan || ""; d.gateway = gw || ""; d.dns = dns || "";
+                    let mm = (rt || "").match(/ dev (\S+).*? src (\S+)/);
+                    let route = mm ? mm[1] + " " + mm[2] : "";
+                    d.vpn = mm && mm[1] !== d.iface ? mm[1] : "";
+                    if (route !== this._route) {          // VPN up/down or network change → new public IP
+                        this._route = route;
+                        this._extAt = 0;
+                    }
                 });
         }
         if (d.iface) {
             let rx = readNum(`/sys/class/net/${d.iface}/statistics/rx_bytes`), tx = readNum(`/sys/class/net/${d.iface}/statistics/tx_bytes`);
             if (!isNaN(rx) && !isNaN(tx)) {
-                if (this.prevNet) { d.down = Math.max(0, rx - this.prevNet[0]); d.upl = Math.max(0, tx - this.prevNet[1]); }
-                this.prevNet = [rx, tx];
+                let now = GLib.get_monotonic_time() / 1e6;
+                if (this.prevNet) {
+                    let dt = Math.max(0.5, now - this.prevNet[2]);
+                    d.down = Math.max(0, rx - this.prevNet[0]) / dt; d.upl = Math.max(0, tx - this.prevNet[1]) / dt;
+                }
+                this.prevNet = [rx, tx, now];
                 d.totDown = rx; d.totUp = tx;
                 push(this.hDown, d.down); push(this.hUp, d.upl);
             }
         }
-        if (t % 5 === 0)
+        if (open && t % 5 === 0)
             this._sh("ping -c1 -W2 1.1.1.1 2>/dev/null | sed -n 's/.*time=\\([0-9.]*\\).*/\\1/p'",
                 (out) => { d.ping = out ? Math.round(parseFloat(out)) + " ms" : "—"; });
-        if (!d.ext || t % 600 === 0)
+        let now = Date.now();
+        if (!this._extBusy && (!this._extAt || now - this._extAt > 300000)) {
+            this._extBusy = true;
+            this._extAt = now;
             this._sh("curl -s -m 8 https://ipinfo.io/json", (out) => {
+                this._extBusy = false;
                 try {
                     let j = JSON.parse(out);
                     if (j.ip) d.ext = j.ip;
                     let cc = (j.country || "").toLowerCase();
                     if (cc) this._ensureFlag(cc);
-                } catch (e) { }
+                    this.canvas.queue_repaint();
+                } catch (e) { this._extAt = now - 300000 + 30000; }   // retry in 30 s
             });
+        }
+    }
+
+    // ---------- panel values ----------
+    _animate() {
+        // no easing: panel shows values as sampled (smooth transitions were rejected)
+        let d = this.d;
+        this.vis = { cpu: d.cpu, mem: d.memPct, load1: d.load1, temp: d.cpuTemp, down: d.down, upl: d.upl };
+        // repaint only when what the panel shows changed (cpumem sparklines move every tick)
+        let w = this.wx, sig = this.mode === "cpumem" ? Math.random() : [this.mode, (d.load1 || 0).toFixed(2), Math.round(d.cpuTemp),
+            this._upShort(), fmtBytes(d.down), fmtBytes(d.upl), d.ext, !!this.flag, w ? Math.round(w.t) + w.sym : "", this._rainIn()].join("|");
+        if (sig === this._sig) return;
+        this._sig = sig;
+        this.canvas.queue_repaint();
+    }
+    _v(k, fallback) { let v = this.vis[k]; return v === undefined || isNaN(v) ? fallback : v; }
+
+    // ---------- glass drop-down ----------
+    _menuStyle() {
+        // same dark navy gradient as the Coreglow desklet (DARK.bgTop -> DARK.bg); light theme keeps the theme's popup
+        if (!this.menu || !this.menu.box) return;
+        if (this.C.text[0] <= 128) { this.menu.box.set_style(null); return; }
+        let t = DARK.bgTop, b = DARK.bg;
+        this.menu.box.set_style(
+            `background-color: rgb(${b.join(",")});` +
+            `background-gradient-direction: vertical; background-gradient-start: rgb(${t.join(",")}); background-gradient-end: rgb(${b.join(",")});` +
+            `border: none; border-radius: 12px;`);
+    }
+    _accent() { let a = MODE_ACCENT[this.mode] || MODE_ACCENT.cpumem; return [a[0], a[1], a[2], 1]; }
+
+    // ---------- clickable regions in the drop-down ----------
+    _menuClick(actor, event) {
+        let [ex, ey] = event.get_coords(), [ax, ay] = actor.get_transformed_position();
+        let x = (ex - ax) / MENU_SCALE, y = (ey - ay) / MENU_SCALE;
+        for (let h of this.hits)
+            if (x >= h.x && x <= h.x + h.w && y >= h.y && y <= h.y + h.h) { h.fn(); this.menuCanvas.queue_repaint(); return true; }
+        return false;
+    }
+
+    _kill(p) {
+        let now = Date.now();
+        // two-step: first click arms, second click within 3 s sends SIGTERM
+        if (!this.killArm || this.killArm.pid !== p.pid || now - this.killArm.at > 3000) {
+            this.killArm = { pid: p.pid, at: now };
+            Mainloop.timeout_add(3100, () => { if (this.menuCanvas) this.menuCanvas.queue_repaint(); return false; });
+            return;
+        }
+        this.killArm = null;
+        let pid = parseInt(p.pid);
+        if (!(pid > 1)) return;
+        this._sh(`kill -TERM ${pid} 2>/dev/null && echo ok || echo fail`, (o) => {
+            this.killMsg = (o === "ok" ? "sent SIGTERM to " : "not permitted: ") + p.name;
+            this.d.topCpu = this.d.topCpu.filter(q => o !== "ok" || q.pid !== pid);
+            Mainloop.timeout_add_seconds(4, () => { this.killMsg = ""; return false; });
+        });
+    }
+
+    // ---------- extra temperature sensors ----------
+    _tempSensors(t) {
+        let d = this.d;
+        if (this.hwAcpi) { d.acpiTemp = readNum(this.hwAcpi + "/temp1_input") / 1000; if (!isNaN(d.acpiTemp)) push(this.hAcpi, d.acpiTemp); }
+        if (this.hwNvme) { let v = readNum(this.hwNvme + "/temp1_input") / 1000; if (!isNaN(v)) { d.nvmeTemp = v; push(this.hNvme, v); } }
+        if (this.hasNvidia && (t === 1 || t % 3 === 0))
+            this._sh("nvidia-smi --query-gpu=temperature.gpu --format=csv,noheader,nounits | head -1", (o) => { let v = parseFloat(o); if (!isNaN(v)) d.gpuTemp = v; });
+        if (!isNaN(d.gpuTemp)) push(this.hGpu, d.gpuTemp);
+    }
+
+    // ---------- weather (MET Norway locationforecast) ----------
+    _wxLat() { let v = parseFloat(this.wxLat); return isNaN(v) ? 35.2681 : +v.toFixed(4); }
+    _wxLon() { let v = parseFloat(this.wxLon); return isNaN(v) ? 25.1818 : +v.toFixed(4); }
+
+    _wxTick(force) {
+        let key = this._wxLat() + "," + this._wxLon(), now = Date.now();
+        let period = Math.max(10, this.wxMins || 30) * 60000;
+        if (key !== this.wxKey) { this.wxKey = key; this.wxAt = 0; this.wx = null; }
+        if (this._wxBusy || (this.wxAt && now - this.wxAt < period && !(force && !this.wx))) return;
+        this._wxBusy = true;
+        this.wxAt = now;
+        let url = `https://api.met.no/weatherapi/locationforecast/2.0/complete?lat=${this._wxLat()}&lon=${this._wxLon()}`;
+        this._sh(`curl -s -m 12 -A '${WX_UA}' '${url}'`, (out) => {
+            this._wxBusy = false;
+            try { this.wx = this._parseWx(JSON.parse(out)); this._sunTick(); }
+            catch (e) { this.wxAt = now - period + 120000; }   // retry in 2 min
+            this.canvas.queue_repaint();
+            if (this.menuCanvas) this.menuCanvas.queue_repaint();
+        });
+        // _sh swallows spawn errors; never stay busy forever
+        Mainloop.timeout_add_seconds(20, () => { this._wxBusy = false; return false; });
+    }
+
+    _parseWx(j) {
+        let ts = j.properties.timeseries;
+        let at = s => GLib.DateTime.new_from_iso8601(s, null).to_local();
+        let nowU = GLib.DateTime.new_now_utc().to_unix();
+        let i0 = 0;
+        while (i0 + 1 < ts.length && at(ts[i0 + 1].time).to_unix() <= nowU) i0++;
+        let sym = e => {
+            let dd = e.data;
+            let n = dd.next_1_hours || dd.next_6_hours || dd.next_12_hours;
+            return n && n.summary ? n.summary.symbol_code : "cloudy";
+        };
+        let cur = ts[i0], det = cur.data.instant.details;
+        let hours = [];
+        for (let i = i0 + 1; i < ts.length && hours.length < 6; i++) {
+            let dt = at(ts[i].time), n1 = ts[i].data.next_1_hours;
+            if (!n1) break;
+            hours.push({ h: dt.get_hour(), t: ts[i].data.instant.details.air_temperature, sym: sym(ts[i]), mm: n1.details ? n1.details.precipitation_amount || 0 : 0 });
+        }
+        let days = [], byDay = {};
+        for (let i = i0; i < ts.length; i++) {
+            let dt = at(ts[i].time), k = dt.format("%Y-%m-%d");
+            if (!byDay[k]) { if (days.length >= 4) break; byDay[k] = { dt, min: 1e9, max: -1e9, sym: null, symDist: 99, mm: 0 }; days.push(byDay[k]); }
+            let D = byDay[k], t = ts[i].data.instant.details.air_temperature, h = dt.get_hour();
+            D.min = Math.min(D.min, t); D.max = Math.max(D.max, t);
+            let dd = Math.abs(h - 13);
+            if (dd < D.symDist) { D.symDist = dd; D.sym = sym(ts[i]); }
+            let n1 = ts[i].data.next_1_hours, n6 = ts[i].data.next_6_hours;
+            if (n1 && n1.details) D.mm += n1.details.precipitation_amount || 0;
+            else if (n6 && n6.details && h % 6 === 0) D.mm += n6.details.precipitation_amount || 0;
+        }
+        let n1 = cur.data.next_1_hours;
+        // first rainy hour in the next 12 h
+        let rainAt = null, rainMm = 0;
+        for (let i = i0; i < ts.length && i < i0 + 13; i++) {
+            let r = ts[i].data.next_1_hours;
+            if (r && r.details && (r.details.precipitation_amount || 0) >= 0.2) { rainAt = at(ts[i].time); rainMm = r.details.precipitation_amount; break; }
+        }
+        let today = at(cur.time).format("%Y-%m-%d"), uvMax = 0;
+        for (let i = i0; i < ts.length; i++) {
+            let dt = at(ts[i].time);
+            if (dt.format("%Y-%m-%d") !== today) break;
+            uvMax = Math.max(uvMax, ts[i].data.instant.details.ultraviolet_index_clear_sky || 0);
+        }
+        let feels = det.apparent_air_temperature;
+        if (feels === undefined) {
+            let e = det.relative_humidity / 100 * 6.105 * Math.exp(17.27 * det.air_temperature / (237.7 + det.air_temperature));
+            feels = det.air_temperature + 0.33 * e - 0.70 * (det.wind_speed || 0) - 4.0;
+        }
+        return {
+            feels, uv: det.ultraviolet_index_clear_sky || 0, uvMax, rainAt, rainMm,
+            t: det.air_temperature, hum: det.relative_humidity, wind: (det.wind_speed || 0) * 3.6,
+            dir: det.wind_from_direction, pres: det.air_pressure_at_sea_level, sym: sym(cur),
+            mm: n1 && n1.details ? n1.details.precipitation_amount || 0 : 0,
+            hours, days: days.slice(0, 3), at: GLib.DateTime.new_now_local().format("%H:%M"),
+        };
+    }
+
+    _sunTick() {
+        let now = GLib.DateTime.new_now_local(), day = now.format("%Y-%m-%d");
+        if (this.sunDay === day && this.sun) return;
+        this.sunDay = day;
+        let url = `https://api.met.no/weatherapi/sunrise/3.0/sun?lat=${this._wxLat()}&lon=${this._wxLon()}&date=${day}&offset=${now.format("%:z")}`;
+        this._sh(`curl -s -m 12 -A '${WX_UA}' '${url}'`, (out) => {
+            try {
+                let p = JSON.parse(out).properties, hm = s => (s || "").slice(11, 16);
+                this.sun = { rise: hm(p.sunrise && p.sunrise.time), set: hm(p.sunset && p.sunset.time) };
+            } catch (e) { this.sunDay = ""; }
+        });
+    }
+
+    _rainIn() {
+        let w = this.wx;
+        if (!w || !w.rainAt) return null;
+        return Math.round((w.rainAt.to_unix() - GLib.DateTime.new_now_utc().to_unix()) / 60);
+    }
+
+    _rainText() {
+        let w = this.wx, m = this._rainIn();
+        if (m === null) return "No rain expected in the next 12 h";
+        if (m <= 0) return `Raining now · ${w.rainMm.toFixed(1)} mm/h`;
+        let when = m < 60 ? `in ${m}′` : `in ${Math.floor(m / 60)} h ${String(m % 60).padStart(2, "0")}′`;
+        return `Rain ${when} · ${w.rainAt.format("%H:%M")} · ${w.rainMm.toFixed(1)} mm`;
+    }
+
+    _rainNotify() {
+        let w = this.wx, m = this._rainIn();
+        if (m === null || m > 60 || m < -5) return;
+        let key = w.rainAt.format("%Y%m%d%H");
+        if (this._rainKey === key) return;
+        this._rainKey = key;
+        let place = (this.wxPlace || "").replace(/['"\\$`]/g, "");
+        Util.spawn(["notify-send", "-i", "weather-showers", "-a", "Coreglow",
+            m <= 0 ? "Rain now" : `Rain in ~${m} min`, `${w.rainMm.toFixed(1)} mm expected at ${w.rainAt.format("%H:%M")}${place ? " · " + place : ""}`]);
+    }
+
+    _uvColor(u) {
+        return u >= 8 ? this.C.hot : u >= 6 ? [255, 120, 50, 1] : u >= 3 ? this.C.sun : this.C.ok;
+    }
+
+    _wxDesc(sym) {
+        let b = (sym || "").replace(/_(day|night|polartwilight)$/, "");
+        const M = {
+            clearsky: "Clear", fair: "Fair", partlycloudy: "Partly cloudy", cloudy: "Cloudy", fog: "Fog",
+            lightrain: "Light rain", rain: "Rain", heavyrain: "Heavy rain",
+            lightrainshowers: "Light showers", rainshowers: "Showers", heavyrainshowers: "Heavy showers",
+            lightsleet: "Light sleet", sleet: "Sleet", heavysleet: "Heavy sleet",
+            lightsnow: "Light snow", snow: "Snow", heavysnow: "Heavy snow",
+        };
+        if (M[b]) return M[b];
+        let s = b.replace(/andthunder/, " + thunder").replace(/showers/, " showers").replace(/^light/, "light ").replace(/^heavy/, "heavy ");
+        return s.charAt(0).toUpperCase() + s.slice(1);
+    }
+
+    _compass(deg) {
+        if (deg === undefined || isNaN(deg)) return "";
+        return ["N", "NE", "E", "SE", "S", "SW", "W", "NW"][Math.round(deg / 45) % 8];
+    }
+
+    // Vector weather icon in a box of width s centred on (cx, cy).
+    _wxIcon(cr, cx, cy, s, sym) {
+        let C = this.C, b = sym || "cloudy";
+        let night = /_night$/.test(b), base = b.replace(/_(day|night|polartwilight)$/, "");
+        let thunder = /thunder/.test(base), snow = /snow/.test(base), sleet = /sleet/.test(base);
+        let rain = /rain/.test(base) && !sleet, showers = /showers/.test(base);
+        let heavy = /^heavy/.test(base), light = /^light/.test(base);
+        let precip = rain || snow || sleet || thunder;
+        let celestial = base === "clearsky" || base === "fair" || base === "partlycloudy" || showers;
+        let dark = C.text[0] > 128;
+        let cloudCol = thunder ? (dark ? [150, 158, 178, 1] : [110, 118, 135, 1]) : (dark ? [214, 222, 236, 1] : [160, 170, 188, 1]);
+
+        let sun = (x, y, r) => {
+            if (night) {
+                cr.save();
+                cr.newPath();
+                cr.rectangle(x - 3 * r, y - 3 * r, 6 * r, 6 * r);
+                cr.arc(x + r * 0.55, y - r * 0.35, r * 0.85, 0, 2 * Math.PI);
+                cr.setFillRule(Cairo.FillRule.EVEN_ODD);
+                cr.clip();
+                this._col(cr, [235, 225, 190, 1]);
+                cr.newPath(); cr.arc(x, y, r, 0, 2 * Math.PI); cr.fill();
+                cr.restore();
+                return;
+            }
+            this._col(cr, C.sun, 0.18);
+            cr.newPath(); cr.arc(x, y, r * 1.55, 0, 2 * Math.PI); cr.fill();
+            this._col(cr, C.sun);
+            cr.newPath(); cr.arc(x, y, r, 0, 2 * Math.PI); cr.fill();
+            cr.setLineWidth(Math.max(1, r * 0.22)); cr.setLineCap(Cairo.LineCap.ROUND);
+            for (let k = 0; k < 8; k++) {
+                let a = k * Math.PI / 4;
+                cr.newPath();
+                cr.moveTo(x + Math.cos(a) * r * 1.35, y + Math.sin(a) * r * 1.35);
+                cr.lineTo(x + Math.cos(a) * r * 1.75, y + Math.sin(a) * r * 1.75);
+                cr.stroke();
+            }
+        };
+        let cloud = (x, y, w, col) => {      // (x, y) = centre of the cloud base line
+            let h = w * 0.34;
+            this._col(cr, col);
+            cr.newPath(); this._rrect(cr, x - w / 2, y - h, w, h, h / 2); cr.fill();
+            cr.newPath(); cr.arc(x - w * 0.18, y - h * 0.95, w * 0.21, 0, 2 * Math.PI); cr.fill();
+            cr.newPath(); cr.arc(x + w * 0.10, y - h * 1.15, w * 0.27, 0, 2 * Math.PI); cr.fill();
+        };
+
+        if (base === "clearsky") { sun(cx, cy, s * 0.24); return; }
+        if (base === "fog") {
+            cloud(cx, cy - s * 0.02, s * 0.86, cloudCol);
+            this._col(cr, C.label); cr.setLineWidth(Math.max(1.2, s * 0.07)); cr.setLineCap(Cairo.LineCap.ROUND);
+            [0.14, 0.28].forEach((dy, i) => { cr.newPath(); cr.moveTo(cx - s * (0.38 - i * 0.08), cy + s * dy); cr.lineTo(cx + s * (0.34 + i * 0.04), cy + s * dy); cr.stroke(); });
+            return;
+        }
+        let cyc = precip ? cy + s * 0.04 : cy + s * 0.2;
+        if (celestial) {
+            let r = base === "fair" ? s * 0.2 : s * 0.16;
+            sun(cx - s * 0.17, cyc - s * 0.36, r);
+        }
+        let cw = base === "fair" ? s * 0.62 : s * 0.86;
+        cloud(base === "fair" ? cx + s * 0.12 : cx, cyc, cw, cloudCol);
+        if (!precip) return;
+
+        let n = heavy ? 4 : light ? 2 : 3, y0 = cyc + s * 0.1, len = s * 0.2;
+        let span = s * 0.5, x0 = cx - span / 2;
+        cr.setLineCap(Cairo.LineCap.ROUND);
+        for (let k = 0; k < n; k++) {
+            let x = x0 + (n === 1 ? span / 2 : k * span / (n - 1));
+            let flake = snow || (sleet && k % 2);
+            if (flake) {
+                this._col(cr, dark ? [235, 242, 255, 1] : [120, 160, 220, 1]);
+                cr.newPath(); cr.arc(x, y0 + len * 0.55, Math.max(1.1, s * 0.05), 0, 2 * Math.PI); cr.fill();
+            } else if (rain || sleet) {
+                this._col(cr, C.rain); cr.setLineWidth(Math.max(1.2, s * 0.065));
+                cr.newPath(); cr.moveTo(x + len * 0.25, y0); cr.lineTo(x - len * 0.15, y0 + len); cr.stroke();
+            }
+        }
+        if (thunder) {
+            let bx = cx + s * 0.04, by = cyc + s * 0.04, u = s * 0.11;
+            this._col(cr, C.sun);
+            cr.newPath();
+            cr.moveTo(bx + u * 0.4, by); cr.lineTo(bx - u * 0.7, by + u * 1.6); cr.lineTo(bx, by + u * 1.6);
+            cr.lineTo(bx - u * 0.5, by + u * 3.0); cr.lineTo(bx + u * 1.0, by + u * 1.1); cr.lineTo(bx + u * 0.2, by + u * 1.1);
+            cr.lineTo(bx + u * 0.9, by); cr.closePath(); cr.fill();
+        }
+    }
+
+    _tempHue(t) {
+        // cold → blue, mild → teal/green, warm → amber, hot → red
+        if (isNaN(t)) return this.C.label;
+        if (t < 5) return [110, 170, 255, 1];
+        if (t < 15) return [90, 210, 220, 1];
+        if (t < 25) return [120, 215, 140, 1];
+        if (t < 32) return this.C.sun;
+        return this.C.hot;
+    }
+
+    _wxBody(cr) {
+        let C = this.C, w = this.wx, pad = 12, right = MW - 12;
+        this._header(cr, pad, right);
+        this._tracked(cr, "WEATHER", pad, 44, 9.2, C.label, 0.7, "l");
+        this._text(cr, this._fit(cr, this.wxPlace || "—", 170, 9.5, true), right, 44, "r", C.label, 9.5, true);
+        if (!w) { this._text(cr, "loading forecast…", pad, 80, "l", C.label, 11); return; }
+
+        this._wxIcon(cr, 46, 82, 62, w.sym);
+        this._text(cr, Math.round(w.t) + "°", 92, 92, "l", C.text, 36, true);
+        this._text(cr, this._fit(cr, this._wxDesc(w.sym), 120, 12, true), 92, 112, "l", this._tempHue(w.t), 12, true);
+        if (w.days.length) {
+            let d0 = w.days[0];
+            this._text(cr, `H ${Math.round(d0.max)}°   L ${Math.round(d0.min)}°`, right, 68, "r", C.label, 10.5);
+        }
+        if (this.sun) {
+            let x = right - this._text(cr, this.sun.set, right, 88, "r", C.text, 10.5, true);
+            x -= this._arrowIconW(10) + 2; this._arrowIcon(cr, x, 87, false, [255, 140, 60, 1], 10);
+            x -= 8 + this._textW(cr, this.sun.rise, 10.5, true);
+            this._text(cr, this.sun.rise, x, 88, "l", C.text, 10.5, true);
+            x -= this._arrowIconW(10) + 2; this._arrowIcon(cr, x, 87, true, C.sun, 10);
+        }
+        // rain alert line
+        let m = this._rainIn(), soon = m !== null && m <= 120;
+        if (m !== null) this._drop(cr, pad + 3, 130, 4.5, C.rain);
+        this._text(cr, this._rainText(), m !== null ? pad + 12 : pad, 134, "l", soon ? C.rain : C.label, 10.5, soon);
+
+        let cols = [["FEELS", Math.round(w.feels) + "°", C.text], ["HUMIDITY", Math.round(w.hum) + "%", C.text],
+            ["WIND", Math.round(w.wind) + " " + this._compass(w.dir), C.text], ["UV MAX", w.uvMax.toFixed(1), this._uvColor(w.uvMax)]];
+        let cwid = (right - pad) / 4;
+        cols.forEach((c, i) => {
+            let x = pad + i * cwid;
+            this._text(cr, c[0], x, 156, "l", C.label, 8, true);
+            this._text(cr, c[1], x, 172, "l", c[2], 11.5, true);
+        });
+        this._dividerLine(cr, pad, right, 186);
+
+        // next hours
+        this._tracked(cr, "NEXT HOURS", pad, 204, 9.2, C.label, 0.7, "l");
+        this._text(cr, Math.round(w.pres) + " hPa", right, 204, "r", C.label, 9);
+        let hn = w.hours.length, hstep = (right - pad) / Math.max(1, hn);
+        w.hours.forEach((h, i) => {
+            let x = pad + hstep * (i + 0.5);
+            this._text(cr, String(h.h).padStart(2, "0"), x, 222, "c", C.label, 9.5);
+            this._wxIcon(cr, x, 240, 24, h.sym);
+            this._text(cr, Math.round(h.t) + "°", x, 268, "c", C.text, 11.5, true);
+            if (h.mm >= 0.1) this._text(cr, h.mm.toFixed(1), x, 280, "c", C.rain, 8.5, true);
+        });
+        this._dividerLine(cr, pad, right, 288);
+
+        // daily range bars
+        this._tracked(cr, "FORECAST", pad, 306, 9.2, C.label, 0.7, "l");
+        this._text(cr, "MET Norway · " + w.at, right, 306, "r", C.label, 9);
+        let lo = Math.min(...w.days.map(d => d.min)), hi = Math.max(...w.days.map(d => d.max));
+        let bx0 = 150, bx1 = right - 30, span = Math.max(1, hi - lo);
+        w.days.forEach((d, i) => {
+            let y = 328 + i * 20;
+            this._text(cr, i === 0 ? "Today" : d.dt.format("%a"), pad, y, "l", C.text, 11, !i);
+            this._wxIcon(cr, 66, y - 4, 16, d.sym);
+            if (d.mm >= 0.1) this._text(cr, d.mm.toFixed(1) + " mm", 84, y, "l", C.rain, 9, true);
+            this._text(cr, Math.round(d.min) + "°", bx0 - 6, y, "r", C.label, 10.5);
+            cr.newPath(); this._rrect(cr, bx0, y - 6, bx1 - bx0, 5, 2.5); this._col(cr, C.track); cr.fill();
+            let xa = bx0 + (d.min - lo) / span * (bx1 - bx0), xb = bx0 + (d.max - lo) / span * (bx1 - bx0);
+            if (xb - xa < 5) xb = xa + 5;
+            cr.newPath(); this._rrect(cr, xa, y - 6, xb - xa, 5, 2.5);
+            cr.setSource(this._gradX(xa, xb, this._tempHue(d.min), this._tempHue(d.max))); cr.fill();
+            this._text(cr, Math.round(d.max) + "°", right, y, "r", C.text, 10.5, true);
+        });
+    }
+
+    _drop(cr, x, y, r, col) {
+        this._col(cr, col);
+        cr.newPath();
+        cr.moveTo(x, y - r * 2.1);
+        cr.curveTo(x + r * 0.4, y - r * 1.2, x + r, y - r * 0.6, x + r, y);
+        cr.arc(x, y, r, 0, Math.PI);
+        cr.curveTo(x - r, y - r * 0.6, x - r * 0.4, y - r * 1.2, x, y - r * 2.1);
+        cr.closePath(); cr.fill();
+    }
+
+    _textW(cr, s, size, bold) { this._font(cr, size, bold); return cr.textExtents(s).xAdvance; }
+    _arrowIconW(size) { return size * 0.55 + size * 0.35; }
+
+    _metricWx(cr, g) {
+        let C = this.C, w = this.wx, H = g.H;
+        let s = Math.min(26, H - 8);
+        this._wxIcon(cr, 4 + s / 2, H / 2, s, w ? w.sym : "cloudy");
+        let m = this._rainIn();
+        if (m !== null && m <= 120) this._drop(cr, 4 + s - 2, H - 7, 3, C.rain);   // rain soon badge
+        let x = 10 + s;
+        if (g.labels) this._plabel(cr, this._fit(cr, this._upper(this.wxPlace || "WEATHER"), g.W - x - 4, 9.5, true), x, g.labelY);
+        this._text(cr, w ? Math.round(w.t) + "°" : "—", x, g.valueY, "l", w ? C.text : C.label, 14, true);
     }
 
     _tooltip() {
         let d = this.d, C = this.C, hex = this._labelHex;
+        if (this.mode === "weather") {
+            let w = this.wx;
+            this.set_applet_tooltip(w ? `<b>${this.wxPlace || ""}</b>  ${Math.round(w.t)}°  ${this._wxDesc(w.sym)}` : "Weather: loading…", true);
+            return;
+        }
         if (this.mode === "temp") {
             let t = d.cpuTemp, st = stats(this.hTemp);
             this.set_applet_tooltip(`<b>CPU temp</b>  ${isNaN(t) ? "—" : Math.round(t) + "°"}` +
@@ -467,10 +952,11 @@ class CoreglowPanelApplet extends Applet.Applet {
         cr.setSourceRGBA(c[0] / 255, c[1] / 255, c[2] / 255, a === undefined ? (c[3] === undefined ? 1 : c[3]) : a);
     }
     _font(cr, size, bold) {
-        cr.selectFontFace(FONT, Cairo.FontSlant.NORMAL, bold ? Cairo.FontWeight.BOLD : Cairo.FontWeight.NORMAL);
+        cr.selectFontFace(bold ? FONT_MED : FONT, Cairo.FontSlant.NORMAL, Cairo.FontWeight.NORMAL);
         cr.setFontSize(size);
     }
     _text(cr, s, x, y, align, col, size, bold) {
+        if (col === this.C.label && size < 11) size += 0.8;   // secondary labels: slightly larger
         this._font(cr, size, bold); this._col(cr, col);
         let w = cr.textExtents(s).xAdvance;
         cr.moveTo(align === "r" ? x - w : align === "c" ? x - w / 2 : x, y);
@@ -478,7 +964,9 @@ class CoreglowPanelApplet extends Applet.Applet {
         return w;
     }
     _tracked(cr, s, cx, y, size, col, track, align) {
-        this._font(cr, size, true);
+        size *= 1.12;   // section titles: larger and bold
+        cr.selectFontFace(FONT, Cairo.FontSlant.NORMAL, Cairo.FontWeight.BOLD);
+        cr.setFontSize(size);
         let widths = [], total = 0;
         for (let ch of s) { let w = cr.textExtents(ch).xAdvance; widths.push(w); total += w + track; }
         total -= track;
@@ -503,9 +991,24 @@ class CoreglowPanelApplet extends Applet.Applet {
         g.addColorStopRGBA(1, c1[0] / 255, c1[1] / 255, c1[2] / 255, 1);
         return g;
     }
+    _mix(stops, v) {
+        if (v <= stops[0][0]) return stops[0][1];
+        for (let i = 1; i < stops.length; i++) {
+            let [v1, c1] = stops[i];
+            if (v <= v1) {
+                let [v0, c0] = stops[i - 1], k = (v - v0) / Math.max(1e-6, v1 - v0);
+                // interpolate in HSV: RGB blending of green→amber gives muddy olive
+                let h0 = rgb2hsv(c0), h1 = rgb2hsv(c1), dh = h1[0] - h0[0];
+                if (dh > 180) dh -= 360; else if (dh < -180) dh += 360;
+                return hsv2rgb([(h0[0] + dh * k + 360) % 360, h0[1] + (h1[1] - h0[1]) * k, h0[2] + (h1[2] - h0[2]) * k]);
+            }
+        }
+        return stops[stops.length - 1][1];
+    }
     _pctColor(pct) {
-        let w = this.hotAt || 85;
-        return pct >= w + 15 ? this.C.hot : pct >= w ? this.C.warn : this.C.text;
+        // smooth green → amber → red, anchored on the warn threshold
+        let w = this.hotAt || 85, C = this.C;
+        return this._mix([[0, C.ok], [w * 0.5, C.ok], [w, C.warn], [w + 15, C.hot]], isNaN(pct) ? 0 : pct);
     }
     _ringColors(pct) {
         let C = this.C, w = this.hotAt || 85;
@@ -573,8 +1076,8 @@ class CoreglowPanelApplet extends Applet.Applet {
         cr.lineTo(px(first), y + h + 0.5);
         cr.closePath();
         let g = new Cairo.LinearGradient(0, y, 0, y + h);
-        g.addColorStopRGBA(0, col[0] / 255, col[1] / 255, col[2] / 255, 0.30);
-        g.addColorStopRGBA(1, col[0] / 255, col[1] / 255, col[2] / 255, 0.01);
+        g.addColorStopRGBA(0, col[0] / 255, col[1] / 255, col[2] / 255, 0.42);
+        g.addColorStopRGBA(1, col[0] / 255, col[1] / 255, col[2] / 255, 0.04);
         cr.setSource(g);
         cr.fill();
 
@@ -585,8 +1088,8 @@ class CoreglowPanelApplet extends Applet.Applet {
         };
         cr.setLineJoin(Cairo.LineJoin.ROUND);
         cr.setLineCap(Cairo.LineCap.ROUND);
-        trace(); cr.setLineWidth(3.2); this._col(cr, col, 0.10); cr.stroke();
-        trace(); cr.setLineWidth(1.25); this._col(cr, col, 0.95); cr.stroke();
+        trace(); cr.setLineWidth(3.6); this._col(cr, col, 0.16); cr.stroke();
+        trace(); cr.setLineWidth(1.6); this._col(cr, col, 1); cr.stroke();
 
         let lv = vals[n - 1];
         if (!isNaN(lv)) {
@@ -636,12 +1139,25 @@ class CoreglowPanelApplet extends Applet.Applet {
             cr.paint();
             cr.setOperator(Cairo.Operator.OVER);
             cr.scale(MENU_SCALE, MENU_SCALE);
+            // Content is drawn into a group first; section separators are collected
+            // and turned into rounded tiles painted underneath.
+            this._seps = null;     // no tiles: separators are drawn as plain lines
+            this.hits = [];
+            cr.pushGroup();
             if (this.mode === "load") this._loadBody(cr);
             else if (this.mode === "net") this._netBody(cr);
             else if (this.mode === "uptime") this._uptimeBody(cr);
             else if (this.mode === "ip") this._ipBody(cr);
             else if (this.mode === "temp") this._tempBody(cr);
+            else if (this.mode === "weather") this._wxBody(cr);
             else this._menuBody(cr);
+            let content = cr.popGroup();
+            let mh = { load: MH_LOAD, net: MH_NET, uptime: MH_UP, ip: MH_IP, temp: MH_TEMP, weather: MH_WX }[this.mode] || MH;
+            let bounds = [27].concat(this._seps || [], [mh - 2]);
+            if (this._seps) for (let i = 0; i + 1 < bounds.length; i++) this._tile(cr, 4, bounds[i] + 3, MW - 8, bounds[i + 1] - bounds[i] - 6);
+            this._seps = null;
+            cr.setSource(content);
+            cr.paint();
             cr.restore();
         } finally {
             cr.$dispose();
@@ -678,7 +1194,20 @@ class CoreglowPanelApplet extends Applet.Applet {
         }
     }
 
+    _tile(cr, x, y, w, h) {
+        if (h <= 4) return;
+        let dark = this.C.text[0] > 128;
+        let g = new Cairo.LinearGradient(0, y, 0, y + h);
+        g.addColorStopRGBA(0, dark ? 1 : 0, dark ? 1 : 0, dark ? 1 : 0, dark ? 0.055 : 0.035);
+        g.addColorStopRGBA(1, dark ? 1 : 0, dark ? 1 : 0, dark ? 1 : 0, dark ? 0.025 : 0.02);
+        cr.newPath(); this._rrect(cr, x, y, w, h, 10); cr.setSource(g); cr.fill();
+        cr.newPath(); this._rrect(cr, x + 0.5, y + 0.5, w - 1, h - 1, 9.5);
+        this._col(cr, dark ? [255, 255, 255, 0.07] : [0, 0, 0, 0.06]);
+        cr.setLineWidth(1); cr.stroke();
+    }
+
     _dividerLine(cr, pad, right, y) {
+        if (this._seps) { this._seps.push(y); return; }
         this._col(cr, this.C.divider);
         cr.setLineWidth(1);
         cr.newPath(); cr.moveTo(pad, y + 0.5); cr.lineTo(right, y + 0.5); cr.stroke();
@@ -753,9 +1282,9 @@ class CoreglowPanelApplet extends Applet.Applet {
         for (let v of B) if (!isNaN(v) && v > mx) mx = v;
         this._col(cr, this.C.base);
         cr.newPath(); cr.rectangle(x, y + h, w, 1); cr.fill();
-        this._graph(cr, x, y, w, h, A, this.C.a1, true, mx);
-        this._graph(cr, x, y, w, h, A, this.C.a1, false, mx);
-        this._graph(cr, x, y, w, h, B, this.C.a2, false, mx);
+        this._graph(cr, x, y, w, h, A, this.C.down, true, mx);
+        this._graph(cr, x, y, w, h, A, this.C.down, false, mx);
+        this._graph(cr, x, y, w, h, B, this.C.up, false, mx);
     }
 
     _netBody(cr) {
@@ -765,16 +1294,16 @@ class CoreglowPanelApplet extends Applet.Applet {
         this._text(cr, (d.iface || "—") + "   ·   " + (d.ping || "—"), right, 44, "r", C.label, 9);
 
         this._text(cr, "DOWNLOAD", pad, 62, "l", C.label, 8, true);
-        this._text(cr, fmtBytes(d.down, "/s"), pad, 84, "l", C.a1, 18, true);
+        this._text(cr, fmtBytes(d.down, "/s"), pad, 84, "l", C.down, 18, true);
         this._text(cr, "UPLOAD", 170, 62, "l", C.label, 8, true);
-        this._text(cr, fmtBytes(d.upl, "/s"), 170, 84, "l", C.a2, 18, true);
+        this._text(cr, fmtBytes(d.upl, "/s"), 170, 84, "l", C.up, 18, true);
 
         this._ioGraph(cr, pad, 94, right - pad, 46, this.hDown, this.hUp);
         let tx = pad;
-        tx += this._arrowIcon(cr, tx, 151, false, C.a1, 10) + 2;
-        tx += this._text(cr, "total " + fmtBytes(d.totDown), tx, 152, "l", C.a1, 9.5) + 12;
-        tx += this._arrowIcon(cr, tx, 151, true, C.a2, 10) + 2;
-        this._text(cr, "total " + fmtBytes(d.totUp), tx, 152, "l", C.a2, 9.5);
+        tx += this._arrowIcon(cr, tx, 151, false, C.down, 10) + 2;
+        tx += this._text(cr, "total " + fmtBytes(d.totDown), tx, 152, "l", C.down, 9.5) + 12;
+        tx += this._arrowIcon(cr, tx, 151, true, C.up, 10) + 2;
+        this._text(cr, "total " + fmtBytes(d.totUp), tx, 152, "l", C.up, 9.5);
         this._text(cr, "last 60 s", right, 152, "r", C.label, 9);
         this._dividerLine(cr, pad, right, 168);
 
@@ -817,7 +1346,7 @@ class CoreglowPanelApplet extends Applet.Applet {
         let fw = this._drawFlag(cr, pad, 60, 16);
         this._text(cr, d.ext || "—", pad + (fw ? fw + 8 : 0), 78, "l", C.a1, 22, true);
         this._dividerLine(cr, pad, right, 96);
-        [["LAN", d.lan || "—"], ["INTERFACE", d.iface || "—"], ["GATEWAY", d.gateway || "—"], ["DNS", d.dns || "—"], ["PING", d.ping || "—"]].forEach((r, i) => {
+        [["LAN", d.lan || "—"], ["INTERFACE", d.iface || "—"], ["VPN", d.vpn || "off"], ["GATEWAY", d.gateway || "—"], ["PING", d.ping || "—"]].forEach((r, i) => {
             let y = 118 + i * 22;
             this._text(cr, r[0], pad, y, "l", C.label, 9.5, true);
             this._text(cr, r[1], right, y, "r", C.text, 11.5);
@@ -852,32 +1381,65 @@ class CoreglowPanelApplet extends Applet.Applet {
     _tempBody(cr) {
         let C = this.C, d = this.d, pad = 12, right = MW - 12, t = d.cpuTemp;
         this._header(cr, pad, right);
-        this._tracked(cr, "CPU TEMPERATURE", pad, 44, 9.2, C.label, 0.7, "l");
+        this._tracked(cr, "TEMPERATURES", pad, 44, 9.2, C.label, 0.7, "l");
         let hw = this.hwTemp ? (readFile(this.hwTemp + "/name") || "").trim() : "";
         this._text(cr, hw || "—", right, 44, "r", C.label, 9);
 
         this._ring(cr, 48, 86, 30, isNaN(t) ? 0 : t, 3.4);
         this._text(cr, isNaN(t) ? "—" : Math.round(t) + "°", 48, 86 + 4.5, "c", this._tempColor(t), 13, true);
-        this._tracked(cr, "NOW", 48, 128, 8.5, C.label, 0.9);
+        this._tracked(cr, "CPU", 48, 128, 8.5, C.label, 0.9);
 
         let st = stats(this.hTemp);
-        let stat = (label, value, y) => {
-            this._text(cr, label, 116, y, "l", C.label, 8.5, true);
-            this._text(cr, value, 116, y + 14, "l", C.text, 13);
+        let stat = (label, value, x, y, col) => {
+            this._text(cr, label, x, y, "l", C.label, 8.5, true);
+            this._text(cr, value, x, y + 14, "l", col || C.text, 13, true);
         };
-        stat("MIN · 2 MIN", st ? Math.round(st.min) + "°" : "—", 62);
-        stat("AVG", st ? Math.round(st.avg) + "°" : "—", 96);
-        let col = this._tempColor(t);
-        this._text(cr, "MAX", 200, 62, "l", C.label, 8.5, true);
-        this._text(cr, st ? Math.round(st.max) + "°" : "—", 200, 76, "l", col, 13);
+        stat("MIN", st ? Math.round(st.min) + "°" : "—", 116, 62);
+        stat("AVG", st ? Math.round(st.avg) + "°" : "—", 116, 96);
+        stat("MAX", st ? Math.round(st.max) + "°" : "—", 200, 62, st ? this._tempColor(st.max) : null);
+        if (d.fan > 0) stat("FAN", Math.round(d.fan) + " rpm", 200, 96);
 
-        this._spark(cr, pad, 142, right - pad, 44, this.hTemp, col, isNaN(t) ? 0 : t);
-        this._text(cr, "last 2 min", right, 198, "r", C.label, 9);
+        // all sensors on one graph, shared auto-scaled axis
+        let series = [
+            ["CPU", this.hTemp, [0, 200, 255, 1], d.cpuTemp],
+            ["GPU", this.hGpu, [118, 200, 60, 1], d.gpuTemp],
+            ["NVMe", this.hNvme, [255, 170, 40, 1], d.nvmeTemp],
+            ["Board", this.hAcpi, [170, 120, 255, 1], d.acpiTemp],
+        ].filter(s => !isNaN(s[3]));
+        let gx = pad + 22, gy = 146, gw = right - gx, gh = 62;
+        let lo = 1e9, hi = -1e9;
+        series.forEach(s => s[1].a.forEach(v => { if (!isNaN(v)) { lo = Math.min(lo, v); hi = Math.max(hi, v); } }));
+        if (lo > hi) { lo = 30; hi = 60; }
+        lo = Math.floor((lo - 3) / 5) * 5; hi = Math.ceil((hi + 3) / 5) * 5;
+        [lo, (lo + hi) / 2, hi].forEach(v => {
+            let y = gy + gh - (v - lo) / (hi - lo) * gh;
+            this._col(cr, C.divider); cr.setLineWidth(1);
+            cr.newPath(); cr.moveTo(gx, Math.round(y) + 0.5); cr.lineTo(right, Math.round(y) + 0.5); cr.stroke();
+            this._text(cr, Math.round(v) + "°", gx - 4, y + 3, "r", C.label, 8);
+        });
+        let n = Math.max(2, Math.round(gw));
+        series.forEach(s => {
+            let vals = this._window(s[1], n), first = vals.findIndex(v => !isNaN(v));
+            if (first < 0) return;
+            let px = i => gx + i * gw / (n - 1), py = v => gy + gh - (Math.max(lo, Math.min(hi, v)) - lo) / (hi - lo) * gh;
+            let trace = () => {
+                cr.newPath(); cr.moveTo(px(first), py(vals[first]));
+                for (let i = first + 1; i < n; i++) if (!isNaN(vals[i])) cr.lineTo(px(i), py(vals[i]));
+            };
+            cr.setLineJoin(Cairo.LineJoin.ROUND); cr.setLineCap(Cairo.LineCap.ROUND);
+            trace(); cr.setLineWidth(3.2); this._col(cr, s[2], 0.12); cr.stroke();
+            trace(); cr.setLineWidth(1.4); this._col(cr, s[2]); cr.stroke();
+        });
 
-        if (d.fan > 0) this._text(cr, "FAN  " + Math.round(d.fan) + " rpm", pad, 220, "l", C.label, 10);
-        if (!isNaN(d.nvmeTemp)) {
-            this._text(cr, "NVMe  " + Math.round(d.nvmeTemp) + "°", right, 220, "r", this._tempColor(d.nvmeTemp), 10);
-        }
+        // legend with current values
+        let lw = (right - pad) / Math.max(1, series.length);
+        series.forEach((s, i) => {
+            let x = pad + i * lw;
+            this._dot(cr, x, 232, s[2]);
+            this._text(cr, s[0], x + 8, 232, "l", C.label, 9.5);
+            this._text(cr, Math.round(s[3]) + "°", x + 8, 248, "l", this._tempColor(s[3]), 12, true);
+        });
+        this._text(cr, "last 2 min", right, 232, "r", C.label, 8.5);
     }
 
     _menuBody(cr) {
@@ -941,16 +1503,48 @@ class CoreglowPanelApplet extends Applet.Applet {
             this._text(cr, this._fit(cr, p[0], 190, 10.5), pad, y, "l", i ? C.label : C.text, 10.5);
             this._text(cr, fmtBytes(p[1]), right, y, "r", i ? C.label : C.text, 10.5);
         });
+        sep(494);
+
+        // Top CPU processes with a two-step kill button
+        this._tracked(cr, "TOP CPU", pad, 512, 9.2, C.label, 0.7, "l");
+        this._text(cr, this.killMsg || "click kill twice to end", right, 512, "r", this.killMsg ? C.warn : C.label, 9);
+        if (!d.topCpu.length) this._text(cr, "collecting…", pad, 534, "l", C.label, 10.5);
+        d.topCpu.slice(0, 4).forEach((p, i) => {
+            let y = 532 + i * 17;
+            this._text(cr, this._fit(cr, p.name, 150, 10.5), pad, y, "l", i ? C.label : C.text, 10.5);
+            this._text(cr, String(p.pid), 196, y, "r", C.label, 9);
+            this._text(cr, p.cpu.toFixed(1) + "%", right - 46, y, "r", this._pctColor(p.cpu), 10.5, true);
+            let armed = this.killArm && this.killArm.pid === p.pid && Date.now() - this.killArm.at <= 3000;
+            let bx = right - 38, by = y - 10, bw = 38, bh = 13;
+            cr.newPath(); this._rrect(cr, bx, by, bw, bh, 6.5);
+            this._col(cr, armed ? C.hot : C.track, armed ? 0.9 : undefined); cr.fill();
+            this._text(cr, armed ? "sure?" : "kill", bx + bw / 2, y, "c", armed ? [255, 255, 255, 1] : C.hot, 8.5, true);
+            this.hits.push({ x: bx, y: by, w: bw, h: bh, fn: () => this._kill(p) });
+        });
     }
 
     _metric(cr, g, x, sparkX, label, pct, col, hist) {
+        // on a dark panel lift accents toward white so dim hues (purple, blue) stay readable
+        if (this.C.text[0] > 128) col = [0, 1, 2].map(i => Math.round(col[i] + (255 - col[i]) * 0.22)).concat([1]);
         if (g.labels) {
             this._dot(cr, x, g.labelY, col);
-            this._tracked(cr, label, x + 8, g.labelY, 8, this.C.label, 0.5, "l");
+            this._plabel(cr, label, x + 8, g.labelY);
         }
         this._text(cr, Math.round(pct) + "%", x, g.valueY, "l", this._pctColor(pct), 14, true);
         if (this.showSpark) this._spark(cr, sparkX, g.sparkY, g.sparkW, g.sparkH, hist, col, pct);
     }
+
+    // panel labels: a bit larger, bold, brighter than the menu labels
+    _plabel(cr, label, x, y) {
+        let C = this.C, col = [0, 1, 2].map(i => Math.round(C.label[i] * 0.25 + C.text[i] * 0.75)).concat([1]);
+        cr.selectFontFace(FONT, Cairo.FontSlant.NORMAL, Cairo.FontWeight.BOLD);
+        cr.setFontSize(9.5);
+        this._col(cr, col);
+        for (let ch of label) { cr.moveTo(x, y); cr.showText(ch); x += cr.textExtents(ch).xAdvance + 0.6; }
+    }
+
+    // upper-case without Greek tonos (ΠΑΤΣΙΔΕΣ, not ΠΑΤΣΊΔΕΣ)
+    _upper(s) { return s.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toUpperCase(); }
 
     _dot(cr, x, y, col) {
         this._col(cr, col);
@@ -983,33 +1577,32 @@ class CoreglowPanelApplet extends Applet.Applet {
 
     _metricLoad(cr, g) {
         let C = this.C, d = this.d;
-        let tn = Math.max(1, d.threads.length || 1);
-        let pct = Math.max(0, Math.min(100, 100 * d.load1 / tn));
+        let tn = Math.max(1, d.threads.length || 1), l1 = this._v("load1", d.load1);
+        let pct = Math.max(0, Math.min(100, 100 * l1 / tn));
         if (g.labels) {
             this._dot(cr, 12, g.labelY, C.a1);
-            this._tracked(cr, "LOAD", 20, g.labelY, 8, C.label, 0.5, "l");
+            this._plabel(cr, "LOAD", 20, g.labelY);
         }
-        this._text(cr, d.load1.toFixed(2), 12, g.valueY, "l", this._pctColor(pct), 14, true);
+        this._text(cr, l1.toFixed(2), g.W / 2 + 4, g.valueY, "c", this._pctColor(pct), 14, true);
     }
 
     _metricNet(cr, g) {
         let C = this.C, d = this.d;
-        if (g.labels) {
-            this._dot(cr, 12, g.labelY, C.a1);
-            this._tracked(cr, "NET", 20, g.labelY, 8, C.label, 0.5, "l");
-        }
-        let x = 12;
-        x += this._arrowIcon(cr, x, g.valueY - 1, false, C.a1, 11) + 2;
-        let dw = this._text(cr, fmtBytes(d.down, "/s"), x, g.valueY, "l", C.a1, 12, true);
-        x += dw + 12;
-        x += this._arrowIcon(cr, x, g.valueY - 1, true, C.a2, 11) + 2;
-        this._text(cr, fmtBytes(d.upl, "/s"), x, g.valueY, "l", C.a2, 12, true);
+        // two stacked rows: download on top, upload below
+        let H = g.H, y1 = Math.round(H / 2) - 1, y2 = H - Math.max(3, Math.round(H * 0.1));
+        let fs = H >= 34 ? 13.5 : 12;
+        let row = (y, up, col, v) => {
+            this._arrowIcon(cr, 7, y, up, col, fs);
+            this._text(cr, fmtBytes(v, "/s"), g.W - 6, y, "r", col, fs, true);
+        };
+        row(y1, false, C.down, this._v("down", d.down));
+        row(y2, true, C.up, this._v("upl", d.upl));
     }
 
     _arrowIcon(cr, x, y, up, col, size) {
         let h = size * 0.8, w = size * 0.55, top = y - h, mid = x + w / 2;
         this._col(cr, col);
-        cr.setLineWidth(Math.max(1.2, size / 8));
+        cr.setLineWidth(Math.max(1.4, size / 6.5));
         cr.setLineCap(Cairo.LineCap.ROUND);
         cr.setLineJoin(Cairo.LineJoin.ROUND);
         cr.newPath(); cr.moveTo(mid, top); cr.lineTo(mid, y); cr.stroke();
@@ -1024,39 +1617,43 @@ class CoreglowPanelApplet extends Applet.Applet {
         let C = this.C;
         if (g.labels) {
             this._dot(cr, 12, g.labelY, C.a1);
-            this._tracked(cr, "UPTIME", 20, g.labelY, 8, C.label, 0.5, "l");
+            this._plabel(cr, "UPTIME", 20, g.labelY);
         }
-        this._text(cr, this._upShort(), 12, g.valueY, "l", C.text, 14, true);
+        this._text(cr, this._upShort(), g.W / 2 + 4, g.valueY, "c", C.text, 14, true);
     }
 
     _metricIp(cr, g) {
         let C = this.C, d = this.d;
-        if (g.labels) {
-            this._dot(cr, 12, g.labelY, C.a1);
-            this._tracked(cr, "IP", 20, g.labelY, 8, C.label, 0.5, "l");
-        }
-        let x = 12, fw = this._drawFlag(cr, x, g.valueY - 12, 11);
-        if (fw) x += fw + 6;
-        this._text(cr, d.ext || "—", x, g.valueY, "l", C.text, 12, true);
+        // no label: flag + address centred in the item
+        let ip = d.ext || "—";
+        this._font(cr, 12, true);
+        let tw = cr.textExtents(ip).xAdvance;
+        let fw = this.flag ? this.flag.getWidth() * 11 / this.flag.getHeight() : 0;
+        let total = tw + (fw ? fw + 6 : 0);
+        let x = Math.round((g.W - total) / 2), base = Math.round(g.H / 2 + 4.5);
+        if (fw) { this._drawFlag(cr, x, base - 10, 11); x += fw + 6; }
+        this._text(cr, ip, x, base, "l", C.text, 12, true);
     }
 
     _metricTemp(cr, g) {
-        let C = this.C, d = this.d, t = d.cpuTemp;
+        let C = this.C, t = this._v("temp", this.d.cpuTemp);
         if (g.labels) {
             this._dot(cr, 12, g.labelY, this._tempColor(t));
-            this._tracked(cr, "TEMP", 20, g.labelY, 8, C.label, 0.5, "l");
+            this._plabel(cr, "TEMP", 20, g.labelY);
         }
-        this._text(cr, isNaN(t) ? "—" : Math.round(t) + "°", 12, g.valueY, "l", this._tempColor(t), 14, true);
+        this._text(cr, isNaN(t) ? "—" : Math.round(t) + "°", g.W / 2 + 4, g.valueY, "c", this._tempColor(t), 14, true);
     }
 
     _tempColor(t) {
         let C = this.C;
         if (isNaN(t)) return C.label;
-        return t >= 80 ? C.hot : t >= 60 ? C.warn : C.ok;
+        return this._mix([[0, C.ok], [50, C.ok], [72, C.warn], [88, C.hot]], t);
     }
 
     _upShort() {
         let s = this.d.upSec || 0;
+        if (s < 3600) return `${Math.floor(s / 60)}m`;
+        if (s < 86400) return `${Math.floor(s / 3600)}h ${String(Math.floor(s % 3600 / 60)).padStart(2, "0")}m`;
         return `${Math.floor(s / 86400)}d ${String(Math.floor(s % 86400 / 3600)).padStart(2, "0")}h`;
     }
 
@@ -1074,14 +1671,21 @@ class CoreglowPanelApplet extends Applet.Applet {
             cr.paint();
             cr.setOperator(Cairo.Operator.OVER);
 
-            let cpu = Math.max(0, Math.min(100, this.d.cpu || 0));
-            let mem = Math.max(0, Math.min(100, this.d.memPct || 0));
+            if (this.hover || (this.menu && this.menu.isOpen)) {
+                let dark = C.text[0] > 128;
+                cr.newPath(); this._rrect(cr, 1, 3, g.W - 2, g.H - 6, Math.min(8, (g.H - 6) / 2));
+                this._col(cr, dark ? [255, 255, 255, 0.08] : [0, 0, 0, 0.06]); cr.fill();
+            }
+
+            let cpu = Math.max(0, Math.min(100, this._v("cpu", this.d.cpu || 0)));
+            let mem = Math.max(0, Math.min(100, this._v("mem", this.d.memPct || 0)));
 
             if (this.mode === "load") this._metricLoad(cr, g);
             else if (this.mode === "net") this._metricNet(cr, g);
             else if (this.mode === "uptime") this._metricUp(cr, g);
             else if (this.mode === "ip") this._metricIp(cr, g);
             else if (this.mode === "temp") this._metricTemp(cr, g);
+            else if (this.mode === "weather") this._metricWx(cr, g);
             else {
                 this._metric(cr, g, g.cpuX, g.cpuSparkX, "CPU", cpu, C.a1, this.hCpu);
                 this._metric(cr, g, g.ramX, g.ramSparkX, "RAM", mem, C.a2, this.hMem);

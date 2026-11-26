@@ -12,9 +12,19 @@
             "Network": "net",
             "Uptime": "uptime",
             "Public / LAN IP": "ip",
-            "Temperature": "temp"
+            "Temperature": "temp",
+            "Weather": "weather"
         },
         "description": "Monitor"
+    },
+    "interval": {
+        "type": "spinbutton",
+        "default": 1,
+        "min": 1,
+        "max": 30,
+        "step": 1,
+        "units": "s",
+        "description": "Refresh interval"
     },
     "theme": {
         "type": "combobox",
@@ -63,5 +73,33 @@
         "step": 1,
         "units": "%",
         "description": "Warn threshold (amber / red)"
+    },
+    "headWx": {
+        "type": "header",
+        "description": "Weather (MET Norway)"
+    },
+    "wxPlace": {
+        "type": "entry",
+        "default": "Πατσίδες",
+        "description": "Place name"
+    },
+    "wxLat": {
+        "type": "entry",
+        "default": "35.2681",
+        "description": "Latitude"
+    },
+    "wxLon": {
+        "type": "entry",
+        "default": "25.1818",
+        "description": "Longitude"
+    },
+    "wxMins": {
+        "type": "spinbutton",
+        "default": 30,
+        "min": 10,
+        "max": 180,
+        "step": 5,
+        "units": "min",
+        "description": "Refresh every"
     }
 }

@@ -133,6 +133,11 @@ Gotchas already hit:
 - Editing the settings JSON on disk does **not** update a running applet; use `settings.setValue()`
   via Eval or `reloadExtension()`.
 - `cinnamon --replace` / `global.reexec_self()` clears a cached failed import; `reloadExtension()` is enough afterwards.
+- `reloadExtension()` can leave **0 instances** with no error logged (cached module stays null).
+  Recover without restarting Cinnamon:
+  `let x=imports.ui.extension.getExtension(UUID); imports.misc.fileUtils.requireModule(x.dir.get_path()+'/applet.js', x.dir.get_path(), x.meta, 'applet');`
+  then `appletManager.addAppletToPanels(x, def)` for each `appletManager.definitions` entry with that uuid.
+- Colour ramps (`_mix`) interpolate in **HSV**; RGB blending of green→amber produced muddy olive on the panel.
 - `gdbus call` mis-parses JS arguments (GVariant); use `busctl --user call ... Eval s '<js>'`.
 - Screenshot checks: `gnome-screenshot -f x.png` + `convert x.png -crop WxH+X+Y`. Panel is at the
   **bottom** (y=1400 on the 2560x1440 monitor), notifications at the top are unrelated.
